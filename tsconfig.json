@@ -22,6 +22,7 @@
     "noUnusedParameters": true,
     "useUnknownInCatchVariables": true,
     "noImplicitOverride": true,
+    "strictPropertyInitialization": false,
     "paths": {
       "@app/entity": [
         "libs/entity/src"

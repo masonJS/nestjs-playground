@@ -3,12 +3,11 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "apps/nestjs-playground/src",
   "compilerOptions": {
-    "deleteOutDir": true,
-    "webpack": true,
-    "tsConfigPath": "apps/nestjs-playground/tsconfig.app.json"
+    "webpack": false,
+    "tsConfigPath": "apps/api/tsconfig.app.json"
   },
   "monorepo": true,
-  "root": "apps/nestjs-playground",
+  "root": "apps/api",
   "projects": {
     "entity": {
       "type": "library",
