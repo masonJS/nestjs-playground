@@ -19,17 +19,18 @@ describe('Configuration', () => {
     const dbEnv = configService.get('database', { infer: true });
 
     // then
-    expect(dbEnv).toMatchInlineSnapshot(
-      `
+    expect(dbEnv).toMatchInlineSnapshot(`
       DatabaseEnvironment {
+        "connectTimeoutMS": 5000,
         "database": "test",
+        "idleInTransactionSessionTimeout": 30000,
         "masterHost": "localhost",
         "password": "test",
         "port": 5432,
         "readerHost": "localhost",
+        "statementTimeout": 5000,
         "user": "test",
       }
-    `,
-    );
+    `);
   });
 });

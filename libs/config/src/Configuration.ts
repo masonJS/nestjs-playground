@@ -17,12 +17,12 @@ export class Configuration {
   static getEnv(nodeEnv?: string): Environment {
     const environment = this.getEnvByYml(nodeEnv);
     this.validate(environment);
+
     return environment;
   }
 
   private static getEnvByYml(nodeEnv = process.env.NODE_ENV): Environment {
     const suffix = !nodeEnv || nodeEnv === 'test' ? 'local' : nodeEnv;
-
     const yml = yaml.load(readFileSync(`env/env.${suffix}.yml`, 'utf8'));
 
     return plainToClass(Environment, yml);

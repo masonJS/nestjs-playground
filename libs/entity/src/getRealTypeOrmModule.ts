@@ -16,6 +16,7 @@ export function getPgRealTypeOrmModule() {
     autoLoadEntities: true,
     logging: false,
     namingStrategy: new SnakeNamingStrategy(),
+    synchronize: true,
     extra: {
       statement_timeout: database.statementTimeout,
       idle_in_transaction_session_timeout:

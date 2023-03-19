@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
-import { BuyerEntity } from '@app/entity/domain/buyer/Buyer.entity';
+import { Buyer } from '@app/entity/domain/buyer/Buyer';
+import { TypeOrmModule } from '@nestjs/typeorm';
 
 @Module({
-  imports: [BuyerEntity],
+  imports: [TypeOrmModule.forFeature([Buyer])],
+  exports: [TypeOrmModule],
 })
 export class EntityModule {}

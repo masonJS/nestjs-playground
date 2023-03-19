@@ -3,7 +3,7 @@ import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType
 import { BaseEntity } from '@app/entity/domain/BaseEntity';
 
 @Entity()
-export class BuyerEntity extends BaseEntity {
+export class Buyer extends BaseEntity {
   @Column('varchar', { length: 255 })
   email: string;
 
