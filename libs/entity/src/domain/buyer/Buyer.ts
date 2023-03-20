@@ -21,4 +21,22 @@ export class Buyer extends BaseEntity {
 
   @Column('varchar', { length: 20 })
   receiveAlarmType: ReceiveAlarmType;
+
+  static create(
+    email: string,
+    password: string,
+    name: string,
+    countryNumber: string,
+    phoneNumber: string,
+    receiveAlarmType: ReceiveAlarmType,
+  ): Buyer {
+    const buyer = new Buyer();
+    buyer.email = email;
+    buyer.password = password;
+    buyer.name = name;
+    buyer.countryNumber = countryNumber;
+    buyer.phoneNumber = phoneNumber;
+    buyer.receiveAlarmType = receiveAlarmType;
+    return buyer;
+  }
 }
