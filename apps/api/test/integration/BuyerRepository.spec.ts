@@ -4,8 +4,8 @@ import { getPgRealTypeOrmModule } from '@app/entity/getRealTypeOrmModule';
 import { EntityModule } from '@app/entity/EntityModule';
 import { EntityManager } from 'typeorm';
 import { BuyerRepository } from '../../src/buyer/BuyerRepository';
-import { Buyer } from '@app/entity/domain/buyer/Buyer';
 import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType';
+import { Buyer } from '@app/entity/domain/buyer/Buyer.entity';
 
 describe('BuyerRepository', () => {
   let buyerRepository: BuyerRepository;
