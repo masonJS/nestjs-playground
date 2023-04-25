@@ -38,7 +38,8 @@
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.2.0",
     "typeorm": "^0.3.12",
-    "typeorm-naming-strategies": "^4.1.0"
+    "typeorm-naming-strategies": "^4.1.0",
+    "winston": "^3.8.2"
   },
   "devDependencies": {
     "@faker-js/faker": "^7.6.0",
@@ -91,7 +92,8 @@
     ],
     "moduleNameMapper": {
       "^@app/entity(|/.*)$": "<rootDir>/libs/entity/src/$1",
-      "^@app/config(|/.*)$": "<rootDir>/libs/config/src/$1"
+      "^@app/config(|/.*)$": "<rootDir>/libs/config/src/$1",
+      "^@app/logger(|/.*)$": "<rootDir>/libs/logger/src/$1"
     }
   }
 }

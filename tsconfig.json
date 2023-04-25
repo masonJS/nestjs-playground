@@ -20,7 +20,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "useUnknownInCatchVariables": false, // catch(e: unknown)  => catch(e: any)로 변경, / ts4로 올라가면서 unknown으로 변경됬는데 이렇게되면 e.message를 사용할 수 없음
+    "useUnknownInCatchVariables": false,
     "noImplicitOverride": true,
     "strictPropertyInitialization": false,
     "paths": {
@@ -35,6 +35,12 @@
       ],
       "@app/config/*": [
         "libs/config/src/*"
+      ],
+      "@app/logger": [
+        "libs/logger/src"
+      ],
+      "@app/logger/*": [
+        "libs/logger/src/*"
       ]
     }
   }
