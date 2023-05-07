@@ -11,7 +11,7 @@ export function getPgRealTypeOrmModule() {
     port: database.port,
     username: database.user,
     password: database.password,
-    database: database.database,
+    database: database.name,
     connectTimeoutMS: database.connectTimeoutMS,
     autoLoadEntities: true,
     logging: false,
