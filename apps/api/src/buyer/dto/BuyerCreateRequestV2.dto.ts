@@ -1,7 +1,7 @@
 import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType';
-import { BuyerEntity } from '@app/entity/domain/buyer/Buyer.entity';
+import { Buyer } from '@app/entity/domain/buyer/Buyer.entity';
 
-export class BuyerCreateRequest {
+export class BuyerCreateRequestDtoV2 {
   email: string;
 
   password: string;
@@ -14,8 +14,8 @@ export class BuyerCreateRequest {
 
   receiveAlarmType: ReceiveAlarmType;
 
-  toEntity(): BuyerEntity {
-    return BuyerEntity.create(
+  toEntity(): Buyer {
+    return Buyer.create(
       this.email,
       this.password,
       this.name,

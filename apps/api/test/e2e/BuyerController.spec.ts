@@ -5,7 +5,7 @@ import { setNestApp } from '../../src/setNestApp';
 import { BuyerFactory } from '../../../../libs/entity/test/factory/BuyerFactory';
 import { EntityManager } from 'typeorm';
 import * as http from 'supertest';
-import { BuyerCreateRequest } from '../../src/buyer/dto/BuyerCreateRequest';
+import { BuyerCreateRequestDto } from '../../src/buyer/dto/BuyerCreateRequest.dto';
 import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType';
 import { plainToClass } from 'class-transformer';
 
@@ -42,7 +42,7 @@ describe('BuyerController', () => {
         phoneNumber: '01012345678',
         receiveAlarmType: ReceiveAlarmType.ALL,
       };
-      const request = plainToClass(BuyerCreateRequest, body);
+      const request = plainToClass(BuyerCreateRequestDto, body);
 
       // when
       const response = await http(app.getHttpServer())
