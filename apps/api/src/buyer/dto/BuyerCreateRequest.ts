@@ -1,17 +1,24 @@
 import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType';
 import { Buyer } from '@app/entity/domain/buyer/Buyer.entity';
+import { ApiProperty } from '@nestjs/swagger';
 
-export class BuyerCreateRequestDtoV2 {
+export class BuyerCreateRequest {
+  @ApiProperty()
   email: string;
 
+  @ApiProperty()
   password: string;
 
+  @ApiProperty()
   name: string;
 
+  @ApiProperty()
   countryNumber: string;
 
+  @ApiProperty()
   phoneNumber: string;
 
+  @ApiProperty()
   receiveAlarmType: ReceiveAlarmType;
 
   toEntity(): Buyer {

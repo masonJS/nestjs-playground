@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { BuyerCreateRequestDto } from './dto/BuyerCreateRequest.dto';
+import { BuyerCreateRequest } from './dto/BuyerCreateRequest';
 import { BuyerRepository } from './BuyerRepository';
 
 @Injectable()
 export class BuyerService {
   constructor(private readonly buyerRepository: BuyerRepository) {}
 
-  async create(request: BuyerCreateRequestDto) {
+  async create(request: BuyerCreateRequest) {
     await this.buyerRepository.create(request.toEntity());
   }
 }
