@@ -21,6 +21,8 @@ export class SwaggerGenerator {
 
   addApiPropertyToResponse(): SourceFile[] {
     this.#sourceFiles.forEach((sourceFile) => {
+      this.addImportApiProperty(sourceFile);
+
       sourceFile.getClasses().forEach((classDeclaration) => {
         const getAccessors = classDeclaration.getGetAccessors();
 
@@ -42,6 +44,25 @@ export class SwaggerGenerator {
   save() {
     this.#sourceFiles.forEach((sourceFile) => {
       sourceFile.saveSync();
+    });
+  }
+
+  private addImportApiProperty(sourceFile: SourceFile) {
+    const importDeclaration = sourceFile.getImportDeclarations();
+
+    const isImportApiProperty = importDeclaration.some((importDeclaration) => {
+      return importDeclaration
+        .getNamedImports()
+        .some((namedImport) => namedImport.getName() === 'ApiProperty');
+    });
+
+    if (isImportApiProperty) {
+      return;
+    }
+
+    sourceFile.addImportDeclaration({
+      namedImports: ['ApiProperty'],
+      moduleSpecifier: '@nestjs/swagger',
     });
   }
 }

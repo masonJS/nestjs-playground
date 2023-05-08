@@ -23,7 +23,9 @@ describe('SwaggerGenerator', () => {
 
     // then
     expect(sourceFiles[0].getText()).toMatchInlineSnapshot(`
-      "class BuyerCreateRequest {
+      "import { ApiProperty } from "@nestjs/swagger";
+
+          class BuyerCreateRequest {
             id: number;
             
             @ApiProperty()
