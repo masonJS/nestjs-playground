@@ -9,6 +9,7 @@ async function bootstrap() {
   setNestApp(app);
   setSwagger(app);
 
+  app.enableShutdownHooks(); // graceful showdown
   await app.listen(3000);
 }
 
