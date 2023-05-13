@@ -1,5 +1,6 @@
 import { MediaType } from '@app/web-client/http/MediaType';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
+import { ResponseSpec } from '@app/web-client/http/ResponseSpec';
 
 export abstract class WebClient {
   abstract get(): this;
@@ -20,5 +21,5 @@ export abstract class WebClient {
 
   abstract body<T>(body: BodyInserter<T>): this;
 
-  abstract retrieve(): Promise<any>;
+  abstract retrieve(): Promise<ResponseSpec>;
 }
