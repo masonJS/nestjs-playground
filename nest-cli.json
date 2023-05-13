@@ -44,6 +44,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/logger/tsconfig.lib.json"
       }
+    },
+    "web-client": {
+      "type": "library",
+      "root": "libs/web-client",
+      "entryFile": "index",
+      "sourceRoot": "libs/web-client/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/web-client/tsconfig.lib.json"
+      }
     }
   }
 }

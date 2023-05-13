@@ -41,6 +41,12 @@
       ],
       "@app/logger/*": [
         "libs/logger/src/*"
+      ],
+      "@app/web-client": [
+        "libs/web-client/src"
+      ],
+      "@app/web-client/*": [
+        "libs/web-client/src/*"
       ]
     }
   }
