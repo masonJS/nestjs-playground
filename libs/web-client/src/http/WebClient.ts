@@ -21,5 +21,7 @@ export abstract class WebClient {
 
   abstract body<T>(body: BodyInserter<T>): this;
 
+  abstract timeout(timeout: number): this;
+
   abstract retrieve(): Promise<ResponseSpec>;
 }
