@@ -4,11 +4,10 @@ import got, { ExtendOptions, Method } from 'got';
 import { MediaType } from '@app/web-client/http/MediaType';
 import { ResponseSpec } from '@app/web-client/http/ResponseSpec';
 
-export class GotClient extends WebClient {
+export class GotClient implements WebClient {
   readonly #options: ExtendOptions;
 
   constructor(url?: string, requestTimeout = 5000) {
-    super();
     this.#options = {
       method: 'GET',
       url: url,

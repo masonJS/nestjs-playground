@@ -2,26 +2,26 @@ import { MediaType } from '@app/web-client/http/MediaType';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
 import { ResponseSpec } from '@app/web-client/http/ResponseSpec';
 
-export abstract class WebClient {
-  abstract get(): this;
+export interface WebClient {
+  get(): this;
 
-  abstract post(): this;
+  post(): this;
 
-  abstract put(): this;
+  put(): this;
 
-  abstract patch(): this;
+  patch(): this;
 
-  abstract delete(): this;
+  delete(): this;
 
-  abstract uri(url: string): this;
+  uri(url: string): this;
 
-  abstract accept(mediaType: MediaType): this;
+  accept(mediaType: MediaType): this;
 
-  abstract header(param: Record<string, string | string[]>): this;
+  header(param: Record<string, string | string[]>): this;
 
-  abstract body<T>(body: BodyInserter<T>): this;
+  body<T>(body: BodyInserter<T>): this;
 
-  abstract timeout(timeout: number): this;
+  timeout(timeout: number): this;
 
-  abstract retrieve(): Promise<ResponseSpec>;
+  retrieve(): Promise<ResponseSpec>;
 }
