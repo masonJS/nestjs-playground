@@ -2,8 +2,15 @@ export class UrlBuilder {
   #url: string;
   #queryList: URLSearchParams;
 
-  constructor() {
+  constructor(url?: string) {
     this.#queryList = new URLSearchParams();
+    if (url) {
+      this.url(url);
+    }
+  }
+
+  static create(url?: string): UrlBuilder {
+    return new UrlBuilder(url);
   }
 
   url(url: string): this {

@@ -8,9 +8,10 @@ describe('UrlBuilder', () => {
       'https://www.google.com?hello=world',
     ],
   ])('url과 query를 조합해준다.', (url, query, expectUrl) => {
-    const urlBuilder = new UrlBuilder()
-      .url(url)
-      .queryParam(Object.keys(query)[0], Object.values(query)[0]);
+    const urlBuilder = UrlBuilder.create(url).queryParam(
+      Object.keys(query)[0],
+      Object.values(query)[0],
+    );
 
     const result = urlBuilder.build();
 
