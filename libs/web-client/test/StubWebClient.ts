@@ -29,7 +29,7 @@ export class StubWebClient implements WebClient {
     }
 
     if (url) {
-      StubWebClient.instance.uri(url);
+      StubWebClient.instance.url(url);
     }
 
     return StubWebClient.instance;
@@ -65,7 +65,7 @@ export class StubWebClient implements WebClient {
     return this;
   }
 
-  uri(url: string): this {
+  url(url: string): this {
     this.urls.push(url);
 
     return this;
@@ -112,6 +112,39 @@ export class StubWebClient implements WebClient {
     }
 
     return new ResponseSpec(response.statusCode, response.body);
+  }
+
+  addResponse(
+    body: string | Record<string, unknown> | Record<string, unknown>[],
+    statusCode = 200,
+  ): this {
+    this.responses.push({
+      statusCode,
+      body: JSON.stringify(body),
+    });
+
+    return this;
+  }
+
+  addError(message: string, statusCode = 500) {
+    this.responses.push({
+      statusCode,
+      body: message,
+      error: new Error(message),
+    });
+
+    return this;
+  }
+
+  clear(): this {
+    this.urls = [];
+    this.headerList = [];
+    this.methods = [];
+    this.requestBodies = [];
+    this.responses = [];
+    this.requestCount = 0;
+
+    return this;
   }
 
   private parseBody(

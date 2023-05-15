@@ -13,7 +13,7 @@ export interface WebClient {
 
   delete(): this;
 
-  uri(url: string): this;
+  url(url: string): this;
 
   accept(mediaType: MediaType): this;
 

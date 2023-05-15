@@ -14,7 +14,7 @@ describe('GotClient', () => {
       const client = new GotClient();
 
       // when
-      const response = await client.uri(url).retrieve();
+      const response = await client.url(url).retrieve();
 
       // then
       expect(response.statusCode).toBe(200);
@@ -42,7 +42,7 @@ describe('GotClient', () => {
       const client = new GotClient('invalid url');
 
       // when
-      const response = await client.uri(url).retrieve();
+      const response = await client.url(url).retrieve();
 
       // then
       expect(response.statusCode).toBe(200);
@@ -141,7 +141,7 @@ describe('GotClient', () => {
 
       // when
       const response = await client
-        .uri(url)
+        .url(url)
         .post()
         .body(BodyInserter.fromJSON({ key: 'value' }))
         .retrieve();
@@ -159,7 +159,7 @@ describe('GotClient', () => {
 
       // when
       const response = await client
-        .uri(url)
+        .url(url)
         .post()
         .body(BodyInserter.fromFormData({ key: 'value' }))
         .retrieve();
@@ -178,7 +178,7 @@ describe('GotClient', () => {
 
       // when
       const response = await client
-        .uri(url)
+        .url(url)
         .post()
         .body(BodyInserter.fromText(text))
         .retrieve();

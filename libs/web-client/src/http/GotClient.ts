@@ -37,7 +37,7 @@ export class GotClient implements WebClient {
     return this.setMethod('DELETE');
   }
 
-  uri(url: string): this {
+  url(url: string): this {
     this.#options.url = url;
     return this;
   }
