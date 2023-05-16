@@ -1,5 +1,5 @@
 import * as nock from 'nock';
-import { GotClient } from '@app/web-client/http/GotClient';
+import { GotClient } from '@app/web-client/GotClient';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
 import { MediaType } from '@app/web-client/http/MediaType';
 

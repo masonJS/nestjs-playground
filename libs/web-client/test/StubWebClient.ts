@@ -1,4 +1,4 @@
-import { WebClient } from '@app/web-client/http/WebClient';
+import { WebClient } from '@app/web-client/WebClient';
 import { MediaType } from '@app/web-client/http/MediaType';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
 import { Method } from 'got';

@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
-import { WebClientService } from '@app/web-client/WebClientService';
-import { GotWebClientService } from '@app/web-client/GotWebClientService';
+import { WebClientService } from '@app/web-client/creator/WebClientService';
+import { GotClientService } from '@app/web-client/creator/GotClientService';
 
 @Module({
   providers: [
     {
       provide: WebClientService,
-      useClass: GotWebClientService,
+      useClass: GotClientService,
     },
   ],
   exports: [WebClientService],

@@ -1,6 +1,6 @@
-import { WebClientService } from '@app/web-client/WebClientService';
+import { WebClientService } from '@app/web-client/creator/WebClientService';
 import { TestWebClientService } from './TestWebClientService';
-import { StubWebClient } from './StubWebClient';
+import { StubWebClient } from '../StubWebClient';
 
 export class ADto {
   name: string;
