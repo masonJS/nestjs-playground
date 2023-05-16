@@ -1,48 +1,60 @@
 import { WebClient } from '@app/web-client/http/WebClient';
-import { BodyInserter } from '@app/web-client/http/BodyInserter';
-import got, { ExtendOptions, Method } from 'got';
 import { MediaType } from '@app/web-client/http/MediaType';
+import { BodyInserter } from '@app/web-client/http/BodyInserter';
 import { ResponseSpec } from '@app/web-client/http/ResponseSpec';
+import { Method } from 'got';
 
-export class GotClient implements WebClient {
-  readonly #options: ExtendOptions;
+export class FetchClient implements WebClient {
+  #url: string;
+  #options: RequestInit;
+  #timeout: number;
 
   constructor(url?: string, requestTimeout = 5000) {
+    if (url) {
+      this.#url = url;
+    }
     this.#options = {
       method: 'GET',
-      url: url,
-      timeout: {
-        request: requestTimeout,
-      },
     };
+    this.#timeout = requestTimeout;
   }
 
   get(): this {
-    return this.setMethod('GET');
-  }
+    this.setMethod('GET');
 
-  post(): this {
-    return this.setMethod('POST');
-  }
-
-  put(): this {
-    return this.setMethod('PUT');
-  }
-
-  patch(): this {
-    return this.setMethod('PATCH');
-  }
-
-  delete(): this {
-    return this.setMethod('DELETE');
-  }
-
-  url(url: string): this {
-    this.#options.url = url;
     return this;
   }
 
-  header(param: Record<string, string | string[]>): this {
+  post(): this {
+    this.setMethod('POST');
+
+    return this;
+  }
+
+  put(): this {
+    this.setMethod('PUT');
+
+    return this;
+  }
+
+  patch(): this {
+    this.setMethod('PATCH');
+
+    return this;
+  }
+
+  delete(): this {
+    this.setMethod('DELETE');
+
+    return this;
+  }
+
+  url(url: string): this {
+    this.#url = url;
+    return this;
+  }
+
+  header(param: Record<string, string>): this {
     this.#options.headers = param;
     return this;
   }
@@ -52,6 +64,7 @@ export class GotClient implements WebClient {
       ...this.#options.headers,
       'Content-Type': mediaType,
     };
+
     return this;
   }
 
@@ -60,10 +73,10 @@ export class GotClient implements WebClient {
 
     switch (body.mediaType) {
       case MediaType.APPLICATION_JSON:
-        this.#options.json = body.data as Record<string, unknown>;
+        this.#options.body = JSON.stringify(body.data);
         break;
       case MediaType.APPLICATION_FORM_URLENCODED:
-        this.#options.form = body.data as Record<string, unknown>;
+        this.#options.body = new URLSearchParams(body.data as any);
         break;
       default:
         this.#options.body = body.data as any;
@@ -73,25 +86,24 @@ export class GotClient implements WebClient {
   }
 
   timeout(timeout: number): this {
-    this.#options.timeout = {
-      request: timeout,
-    };
-
+    this.#timeout = timeout;
     return this;
   }
 
   async retrieve(): Promise<ResponseSpec> {
     try {
-      const response = await got({
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.#timeout);
+      const response = await fetch(this.#url, {
         ...this.#options,
-        isStream: false,
-        resolveBodyOnly: false,
-        responseType: 'text',
+        signal: controller.signal,
       });
 
-      return new ResponseSpec(response.statusCode, response.body);
+      clearTimeout(timeout);
+
+      return new ResponseSpec(response.status, await response.text());
     } catch (e) {
-      throw new Error(e.message);
+      throw new Error(e);
     }
   }
 
