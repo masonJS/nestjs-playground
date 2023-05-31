@@ -1,10 +1,27 @@
 import {
   GetAccessorDeclaration,
+  MethodDeclaration,
   Project,
   PropertyDeclaration,
   SourceFile,
   Type,
 } from 'ts-morph';
+import { SwaggerDecorator } from './swagger-decorator/SwaggerDecorator';
+import { NestjsSwaggerDecorator } from './swagger-decorator/NestjsSwaggerDecorator';
+import {
+  getImportNameType,
+  getType,
+  isArrayType,
+  isOptionalType,
+  isPageType,
+} from './swagger-type/SwaggerType';
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import * as tsconfig from '../../../../tsconfig.json';
+
+const NESTJS_SWAGGER_MODULE = '@nestjs/swagger';
+const CUSTOM_SWAGGER_MODULE = '@app/web-common/res/swagger/ApiOkResponseBy';
 
 export class SwaggerGenerator {
   #project: Project;
@@ -12,7 +29,10 @@ export class SwaggerGenerator {
 
   constructor(path: string | string[], content?: string) {
     this.#project = new Project({
-      compilerOptions: { strictNullChecks: true },
+      compilerOptions: {
+        strictNullChecks: tsconfig.compilerOptions.strictNullChecks,
+        paths: tsconfig.compilerOptions.paths,
+      },
     });
 
     if (content && typeof path === 'string') {
@@ -26,14 +46,29 @@ export class SwaggerGenerator {
 
   addApiPropertyToRequest() {
     this.#sourceFiles.forEach((sourceFile) => {
-      this.addImportApiProperty(sourceFile);
       const classes = sourceFile.getClasses();
 
+      const isRequestDto = classes.find((classDeclaration) =>
+        classDeclaration.getDecorator('RequestDto'),
+      );
+
+      if (isRequestDto) {
+        this.addImportSwagger(
+          sourceFile,
+          NestjsSwaggerDecorator.API_PROPERTY,
+          NESTJS_SWAGGER_MODULE,
+        );
+      }
+
       classes.forEach((classDeclaration) => {
+        if (!classDeclaration.getDecorator('RequestDto')) {
+          return;
+        }
+
         const properties = classDeclaration.getProperties();
 
         properties
-          .filter((property) => !property.getDecorator('ApiProperty'))
+          .filter((property) => this.canAddApiProperty(property))
           .forEach((property) => this.addApiPropertyToProperty(property));
       });
     });
@@ -41,15 +76,47 @@ export class SwaggerGenerator {
 
   addApiPropertyToResponse() {
     this.#sourceFiles.forEach((sourceFile) => {
-      this.addImportApiProperty(sourceFile);
       const classes = sourceFile.getClasses();
 
+      const isResponseDto = classes.find((classDeclaration) =>
+        classDeclaration.getDecorator('ResponseDto'),
+      );
+
+      if (isResponseDto) {
+        this.addImportSwagger(
+          sourceFile,
+          NestjsSwaggerDecorator.API_PROPERTY,
+          NESTJS_SWAGGER_MODULE,
+        );
+      }
+
       classes.forEach((classDeclaration) => {
+        if (!classDeclaration.getDecorator('ResponseDto')) {
+          return;
+        }
+
         const getters = classDeclaration.getGetAccessors();
 
         getters
-          .filter((getter) => !getter.getDecorator('ApiProperty'))
+          .filter((property) => this.canAddApiProperty(property))
           .forEach((getter) => this.addApiPropertyToGetter(getter));
+      });
+    });
+  }
+
+  addSwaggerToApi() {
+    this.#sourceFiles.forEach((sourceFile) => {
+      const classes = sourceFile.getClasses();
+
+      classes.forEach((classDeclaration) => {
+        const methods = classDeclaration.getMethods();
+
+        methods
+          .filter((method) => !method.hasModifier('private'))
+          .forEach((method) => {
+            this.addApiOperation(sourceFile, method);
+            this.addApiOkResponseBy(sourceFile, method);
+          });
       });
     });
   }
@@ -62,13 +129,116 @@ export class SwaggerGenerator {
     await this.#project.save();
   }
 
+  private addApiOperation(sourceFile: SourceFile, method: MethodDeclaration) {
+    if (method.getDecorator(NestjsSwaggerDecorator.API_OPERATION)) {
+      return;
+    }
+
+    this.addImportSwagger(
+      sourceFile,
+      NestjsSwaggerDecorator.API_OPERATION,
+      NESTJS_SWAGGER_MODULE,
+    );
+
+    method.addDecorator({
+      name: NestjsSwaggerDecorator.API_OPERATION,
+      arguments: [`{ summary: '' }`],
+    });
+  }
+
+  private addApiOkResponseBy(
+    sourceFile: SourceFile,
+    method: MethodDeclaration,
+  ) {
+    const returnType = method.getReturnType();
+    const type = getType(returnType);
+
+    if (!type) {
+      return;
+    }
+
+    if (
+      !method.getDecorator(SwaggerDecorator.API_OK_ARRAY_RESPONSE_BY) &&
+      isArrayType(returnType)
+    ) {
+      this.addImportSwagger(
+        sourceFile,
+        SwaggerDecorator.API_OK_ARRAY_RESPONSE_BY,
+        CUSTOM_SWAGGER_MODULE,
+      );
+
+      method.addDecorator({
+        name: SwaggerDecorator.API_OK_ARRAY_RESPONSE_BY,
+        arguments: [type],
+      });
+
+      return;
+    }
+
+    if (
+      !method.getDecorator(SwaggerDecorator.API_PAGINATE_RESPONSE) &&
+      isPageType(returnType)
+    ) {
+      this.addImportSwagger(
+        sourceFile,
+        SwaggerDecorator.API_PAGINATE_RESPONSE,
+        CUSTOM_SWAGGER_MODULE,
+      );
+
+      method.addDecorator({
+        name: SwaggerDecorator.API_PAGINATE_RESPONSE,
+        arguments: [type],
+      });
+
+      return;
+    }
+
+    if (
+      !method.getDecorator(NestjsSwaggerDecorator.API_RESPONSE) &&
+      !isArrayType(returnType) &&
+      !isPageType(returnType) &&
+      type === 'ResponseEntity'
+    ) {
+      this.addImportSwagger(
+        sourceFile,
+        NestjsSwaggerDecorator.API_RESPONSE,
+        NESTJS_SWAGGER_MODULE,
+      );
+
+      method.addDecorator({
+        name: NestjsSwaggerDecorator.API_RESPONSE,
+        arguments: [`{ type: ${type} }`],
+      });
+
+      return;
+    }
+
+    if (
+      !method.getDecorator(SwaggerDecorator.API_OK_RESPONSE_BY) &&
+      !isArrayType(returnType) &&
+      !isPageType(returnType) &&
+      type !== 'ResponseEntity'
+    ) {
+      this.addImportSwagger(
+        sourceFile,
+        SwaggerDecorator.API_OK_RESPONSE_BY,
+        CUSTOM_SWAGGER_MODULE,
+      );
+
+      method.addDecorator({
+        name: SwaggerDecorator.API_OK_RESPONSE_BY,
+        arguments: [type],
+      });
+    }
+  }
+
   private addApiPropertyToProperty(property: PropertyDeclaration) {
     const propertyType = property.getType();
 
     const propertyOptions = this.getApiPropertyOptions(propertyType);
 
     property.addDecorator({
-      name: 'ApiProperty',
+      name: NestjsSwaggerDecorator.API_PROPERTY,
       arguments: propertyOptions.length
         ? [`{ ${propertyOptions.join(', ')} }`]
         : [],
@@ -81,117 +251,55 @@ export class SwaggerGenerator {
     const propertyOptions = this.getApiPropertyOptions(returnType);
 
     getter.addDecorator({
-      name: 'ApiProperty',
+      name: NestjsSwaggerDecorator.API_PROPERTY,
       arguments: propertyOptions.length
         ? [`{ ${propertyOptions.join(', ')} }`]
         : [],
     });
   }
 
+  private canAddApiProperty(
+    property: PropertyDeclaration | GetAccessorDeclaration,
+  ) {
+    return (
+      !property.getDecorator(NestjsSwaggerDecorator.API_PROPERTY) &&
+      !property.hasModifier('private') &&
+      !property.getDecorator(NestjsSwaggerDecorator.API_HIDE_PROPERTY)
+    );
+  }
+
   private getApiPropertyOptions(returnType: Type) {
-    const type = this.getTypeReferenceAsString(returnType);
-    const isOptional = this.isOptionalProperty(returnType);
+    const type = getType(returnType);
+    const isOptional = isOptionalType(returnType);
     const isEnum = returnType.isEnum() || returnType.isEnumLiteral();
 
     return [
-      type ? `type: ${type}` : undefined,
+      type ? `type: ${returnType.isArray() ? `[${type}]` : type}` : undefined,
       isOptional ? `required: ${!isOptional}` : undefined,
-      isEnum
-        ? `enum: ${this.getImportNameType(returnType.getText())}`
-        : undefined,
+      isEnum ? `enum: ${getImportNameType(returnType.getText())}` : undefined,
     ].filter(Boolean);
   }
 
-  private getTypeReferenceAsString(type: Type): string | undefined {
-    if (type.isArray()) {
-      const arrayType = type.getArrayElementType();
-
-      if (!arrayType) {
-        return undefined;
-      }
-      const elementType = this.getTypeReferenceAsString(arrayType);
-
-      return `[${elementType}]`;
-    }
-
-    if (type.isBoolean()) {
-      return Boolean.name;
-    }
-
-    if (type.isNumber()) {
-      return Number.name;
-    }
-
-    if (type.isEnum() || type.isEnumLiteral()) {
-      return undefined;
-    }
-
-    if (type.isString() || type.isStringLiteral()) {
-      return String.name;
-    }
-
-    if (type.isUnion()) {
-      const unionTypes = type.getUnionTypes();
-
-      return this.getTypeReferenceAsString(unionTypes[unionTypes.length - 1]);
-    }
-
-    if (type.isClass()) {
-      return this.getImportNameType(type.getText());
-    }
-
-    const text = type.getText();
-
-    if (text === Date.name) {
-      return text;
-    }
-
-    if (text === 'any' || text === 'unknown' || text === 'object') {
-      return 'Object';
-    }
-
-    return undefined;
-  }
-
-  private isOptionalProperty(type: Type): boolean {
-    if (type.isUnion()) {
-      const unionTypes = type.getUnionTypes();
-
-      return unionTypes.some(
-        (type) =>
-          type.getText().includes('undefined') ||
-          type.getText().includes('null'),
-      );
-    }
-
-    return type.isUndefined() || type.isNull();
-  }
-
-  // import('...').ClassA 형태에서 named import인 ClassA 만 가져오도록 한다.
-  private getImportNameType(textType: string) {
-    if (!textType.includes('import(')) {
-      return textType;
-    }
-
-    return textType.split('.')[1];
-  }
-
-  private addImportApiProperty(sourceFile: SourceFile) {
-    const isImportApiProperty = sourceFile
+  private addImportSwagger(
+    sourceFile: SourceFile,
+    swaggerDecorator: NestjsSwaggerDecorator | SwaggerDecorator,
+    swaggerModule: string,
+  ) {
+    const isImportSwagger = sourceFile
       .getImportDeclarations()
       .some((importDeclaration) =>
         importDeclaration
           .getNamedImports()
-          .some((namedImport) => namedImport.getName() === 'ApiProperty'),
+          .some((namedImport) => namedImport.getName() === swaggerDecorator),
       );
 
-    if (isImportApiProperty) {
+    if (isImportSwagger) {
       return;
     }
 
     sourceFile.addImportDeclaration({
-      namedImports: ['ApiProperty'],
-      moduleSpecifier: '@nestjs/swagger',
+      namedImports: [swaggerDecorator],
+      moduleSpecifier: swaggerModule,
     });
   }
 }
