@@ -104,5 +104,11 @@
       "^@app/logger(|/.*)$": "<rootDir>/libs/logger/src/$1",
       "^@app/web-client(|/.*)$": "<rootDir>/libs/web-client/src/$1"
     }
+  },
+  "lint-staged": {
+    "*.ts": [
+      "yarn swagger-generate",
+      "eslint --fix"
+    ]
   }
 }
