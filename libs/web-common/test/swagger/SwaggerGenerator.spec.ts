@@ -1,5 +1,4 @@
 import { SwaggerGenerator } from './SwaggerGenerator';
-import * as path from 'path';
 
 describe('SwaggerGenerator', () => {
   describe('addApiPropertyToResponse', () => {
@@ -8,6 +7,64 @@ describe('SwaggerGenerator', () => {
       const content = `
 import { ApiProperty } from '@nestjs/swagger';
 
+@ResponseDto()
+export class UserResponse {
+  get name(): string {
+    return 'name';
+  }
+}`;
+      const generator = new SwaggerGenerator('response.ts', content);
+
+      // when
+      generator.addApiPropertyToResponse();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiProperty } from '@nestjs/swagger';
+
+        @ResponseDto()
+        export class UserResponse {
+          @ApiProperty({ type: String })
+            get name(): string {
+            return 'name';
+          }
+        }"
+      `);
+    });
+
+    it('private 접근 제어자를 가진 getter는 무시한다.', () => {
+      // given
+      const content = `
+@ResponseDto()
+export class UserResponse {
+  private get name(): string {
+    return 'name';
+  }
+}`;
+      const generator = new SwaggerGenerator('response.ts', content);
+
+      // when
+      generator.addApiPropertyToResponse();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiProperty } from "@nestjs/swagger";
+
+        @ResponseDto()
+        export class UserResponse {
+          private get name(): string {
+            return 'name';
+          }
+        }"
+      `);
+    });
+
+    it('ApiProperty 데코레이터가 getter 프로퍼티에 있으면 무시한다.', () => {
+      // given
+      const content = `
+@ResponseDto()
 export class UserResponse {
   @ApiProperty()
   get name(): string {
@@ -22,38 +79,11 @@ export class UserResponse {
       // then
       const text = generator.text()[0];
       expect(text).toMatchInlineSnapshot(`
-              "import { ApiProperty } from '@nestjs/swagger';
-
-              export class UserResponse {
-                @ApiProperty()
-                get name(): string {
-                  return 'name';
-                }
-              }"
-          `);
-    });
-
-    it('ApiProperty 데코레이터가 getter 프로퍼티에 있으면 데코레이터를 무시한다.', () => {
-      // given
-      const content = `
-export class UserResponse {
-  @ApiProperty({ deprecated: true })
-  get name(): string {
-    return 'name';
-  }
-}`;
-      const generator = new SwaggerGenerator('response.ts', content);
-
-      // when
-      generator.addApiPropertyToResponse();
-
-      // then
-      const text = generator.text()[0];
-      expect(text).toMatchInlineSnapshot(`
         "import { ApiProperty } from "@nestjs/swagger";
 
+        @ResponseDto()
         export class UserResponse {
-          @ApiProperty({ deprecated: true })
+          @ApiProperty()
           get name(): string {
             return 'name';
           }
@@ -64,6 +94,7 @@ export class UserResponse {
     it('getter 프로퍼티에 ApiProperty 데코레이터를 붙여준다.', () => {
       // given
       const content = `
+@ResponseDto()
 export class UserResponse {
   get name(): string {
     return 'name';
@@ -79,6 +110,7 @@ export class UserResponse {
       expect(text).toMatchInlineSnapshot(`
         "import { ApiProperty } from "@nestjs/swagger";
 
+        @ResponseDto()
         export class UserResponse {
           @ApiProperty({ type: String })
             get name(): string {
@@ -91,12 +123,13 @@ export class UserResponse {
     it('리턴 타입이 null 또는 undefined인 경우 required 속성값을 false로 반환한다.', () => {
       // given
       const content = `
+@ResponseDto()
 export class UserResponse {
   get name(): string | undefined {
     return 'name';
   }
-  get email(): string | string[] | null {
-    return 'email';
+  get email(): string[]  {
+    return ['email'];
   }
 }`;
       const generator = new SwaggerGenerator('response.ts', content);
@@ -109,14 +142,15 @@ export class UserResponse {
       expect(text).toMatchInlineSnapshot(`
         "import { ApiProperty } from "@nestjs/swagger";
 
+        @ResponseDto()
         export class UserResponse {
           @ApiProperty({ type: String, required: false })
             get name(): string | undefined {
             return 'name';
           }
-          @ApiProperty({ type: [String], required: false })
-            get email(): string | string[] | null {
-            return 'email';
+          @ApiProperty({ type: [String] })
+            get email(): string[]  {
+            return ['email'];
           }
         }"
       `);
@@ -125,6 +159,7 @@ export class UserResponse {
     it('리턴 타입을 명시하지 않은 경우 타입 추론을 한다', () => {
       // given
       const content = `
+@ResponseDto()
 export class UserResponse {
   #prop?: string;
   
@@ -142,6 +177,7 @@ export class UserResponse {
       expect(text).toMatchInlineSnapshot(`
         "import { ApiProperty } from "@nestjs/swagger";
 
+        @ResponseDto()
         export class UserResponse {
           #prop?: string;
           
@@ -157,6 +193,7 @@ export class UserResponse {
       // given
 
       const content = `
+@ResponseDto()
 export class UserResponse {
   
   get prop() {
@@ -174,6 +211,7 @@ export class UserResponse {
       expect(text).toMatchInlineSnapshot(`
         "import { ApiProperty } from "@nestjs/swagger";
 
+        @ResponseDto()
         export class UserResponse {
           
           @ApiProperty({ type: [String] })
@@ -188,6 +226,7 @@ export class UserResponse {
       // given
 
       const content = `
+@ResponseDto()
 export class UserResponse {
   
   get prop(): ClassA {
@@ -207,6 +246,7 @@ class ClassA {}
       expect(text).toMatchInlineSnapshot(`
         "import { ApiProperty } from "@nestjs/swagger";
 
+        @ResponseDto()
         export class UserResponse {
           
           @ApiProperty({ type: ClassA })
@@ -223,6 +263,7 @@ class ClassA {}
       // given
 
       const content = `
+@ResponseDto()
 export class UserResponse {
   
   get prop(): UserStatus {
@@ -244,6 +285,7 @@ enum UserStatus {
       expect(text).toMatchInlineSnapshot(`
         "import { ApiProperty } from "@nestjs/swagger";
 
+        @ResponseDto()
         export class UserResponse {
           
           @ApiProperty({ enum: UserStatus })
@@ -257,19 +299,6 @@ enum UserStatus {
         "
       `);
     });
-
-    it('import 되어지는 클래스, enum 타입을 추론한다.', () => {
-      const generator = new SwaggerGenerator(
-        path.join(__dirname, './UserResponse.ts'),
-      );
-
-      // when
-      generator.addApiPropertyToResponse();
-
-      // then
-      const text = generator.text()[0];
-      expect(text).toMatchInlineSnapshot(`undefined`);
-    });
   });
 
   describe('addApiPropertyToRequest', () => {
@@ -278,6 +307,7 @@ enum UserStatus {
       const content = `
 import { ApiProperty } from '@nestjs/swagger';
 
+@RequestDto()
 export class UserRequest {
   @ApiProperty({ deprecated: true })
   name: string;
@@ -292,6 +322,7 @@ export class UserRequest {
       expect(text).toMatchInlineSnapshot(`
         "import { ApiProperty } from '@nestjs/swagger';
 
+        @RequestDto()
         export class UserRequest {
           @ApiProperty({ deprecated: true })
           name: string;
@@ -299,9 +330,34 @@ export class UserRequest {
       `);
     });
 
+    it('private 접근 제어자를 가진 프로퍼티는 무시한다.', () => {
+      // given
+      const content = `
+@RequestDto()
+export class UserRequest {
+  private name: string;
+}`;
+      const generator = new SwaggerGenerator('request.ts', content);
+
+      // when
+      generator.addApiPropertyToRequest();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiProperty } from "@nestjs/swagger";
+
+        @RequestDto()
+        export class UserRequest {
+          private name: string;
+        }"
+      `);
+    });
+
     it('프로퍼티에 ApiProperty 데코레이터를 붙여준다.', () => {
       // given
       const content = `
+@RequestDto()
 export class UserRequest {
   name: string;
 }`;
@@ -315,10 +371,335 @@ export class UserRequest {
       expect(text).toMatchInlineSnapshot(`
         "import { ApiProperty } from "@nestjs/swagger";
 
+        @RequestDto()
         export class UserRequest {
           @ApiProperty({ type: String })
             name: string;
         }"
+      `);
+    });
+  });
+
+  describe('addSwaggerToApi', () => {
+    it('ApiOperation 이 이미 존재하면 무시한다.', () => {
+      const content = `
+import { ApiOperation } from "@nestjs/swagger";
+
+export class UserController {
+  @ApiOperation({ description: '설명' })
+  save(): UserResponse {
+    return new UserResponse();
+  }
+}
+
+class UserResponse {}
+`;
+      const generator = new SwaggerGenerator('controller.ts', content);
+
+      // when
+      generator.addSwaggerToApi();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiOperation } from "@nestjs/swagger";
+        import { ApiOkResponseBy } from "@app/web-common/res/swagger/ApiOkResponseBy";
+
+        export class UserController {
+          @ApiOperation({ description: '설명' })
+            @ApiOkResponseBy(UserResponse)
+          save(): UserResponse {
+            return new UserResponse();
+          }
+        }
+
+        class UserResponse {}
+        "
+      `);
+    });
+
+    it('ApiOkResponseBy가 이미 존재하면 무시한다.', () => {
+      const content = `
+import { ApiOkResponseBy } from '@app/web-common/res/swagger/ApiOkResponseBy';
+
+export class UserController {
+  @ApiOkResponseBy(UserResponse)
+  save(): UserResponse {
+    return new UserResponse();
+  }
+}
+
+class UserResponse {}
+`;
+      const generator = new SwaggerGenerator('controller.ts', content);
+
+      // when
+      generator.addSwaggerToApi();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiOkResponseBy } from '@app/web-common/res/swagger/ApiOkResponseBy';
+        import { ApiOperation } from "@nestjs/swagger";
+
+        export class UserController {
+          @ApiOkResponseBy(UserResponse)
+            @ApiOperation({ summary: '' })
+          save(): UserResponse {
+            return new UserResponse();
+          }
+        }
+
+        class UserResponse {}
+        "
+      `);
+    });
+
+    it('응답 타입이 배열이면 ApiOkArrayResponseBy 데코레이터를 생성한다.', () => {
+      const content = `
+export class UserController {
+  save() {
+    const response = new UserResponse();
+    return [response];
+  }
+}
+
+class UserResponse {}
+`;
+      const generator = new SwaggerGenerator('controller.ts', content);
+
+      // when
+      generator.addSwaggerToApi();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiOperation } from "@nestjs/swagger";
+        import { ApiOkArrayResponseBy } from "@app/web-common/res/swagger/ApiOkResponseBy";
+
+        export class UserController {
+          @ApiOperation({ summary: '' })
+            @ApiOkArrayResponseBy(UserResponse)
+            save() {
+            const response = new UserResponse();
+            return [response];
+          }
+        }
+
+        class UserResponse {}
+        "
+      `);
+    });
+
+    it('응답 타입이 Page 인스턴스 타입이면 ApiPaginateResponse 데코레이터를 생성한다.', () => {
+      const content = `
+export class UserController {
+  save() {
+   return new Page<UserResponse>();
+  }
+}
+
+class Page<T> {}
+
+class UserResponse {}
+`;
+      const generator = new SwaggerGenerator('controller.ts', content);
+
+      // when
+      generator.addSwaggerToApi();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiOperation } from "@nestjs/swagger";
+        import { ApiPaginateResponse } from "@app/web-common/res/swagger/ApiOkResponseBy";
+
+        export class UserController {
+          @ApiOperation({ summary: '' })
+            @ApiPaginateResponse(UserResponse)
+            save() {
+           return new Page<UserResponse>();
+          }
+        }
+
+        class Page<T> {}
+
+        class UserResponse {}
+        "
+      `);
+    });
+
+    it('응답 타입이 일반 인스턴스 타입이면 ApiOkResponseBy 데코레이터를 생성한다.', () => {
+      const content = `
+export class UserController {
+  save() {
+    return new UserResponse();
+  }
+}
+
+class UserResponse {}
+`;
+      const generator = new SwaggerGenerator('controller.ts', content);
+
+      // when
+      generator.addSwaggerToApi();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiOperation } from "@nestjs/swagger";
+        import { ApiOkResponseBy } from "@app/web-common/res/swagger/ApiOkResponseBy";
+
+        export class UserController {
+          @ApiOperation({ summary: '' })
+            @ApiOkResponseBy(UserResponse)
+            save() {
+            return new UserResponse();
+          }
+        }
+
+        class UserResponse {}
+        "
+      `);
+    });
+
+    it('응답 타입이 ResponseEntity<String> 타입이면 ApiOkResponseBy 데코레이터를 생성한다.', () => {
+      const content = `
+export class UserController {
+  async save(): Promise<ResponseEntity<string>> {
+    return ResponseEntity.OK();
+  }
+}
+
+export class ResponseEntity<T> {
+   static OK(): ResponseEntity<string> {
+    return new ResponseEntity<string>(ResponseStatus.OK, '', '');
+  }
+}
+`;
+      const generator = new SwaggerGenerator('controller.ts', content);
+
+      // when
+      generator.addSwaggerToApi();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiOperation } from "@nestjs/swagger";
+        import { ApiResponse } from "@nestjs/swagger";
+
+        export class UserController {
+          @ApiOperation({ summary: '' })
+            @ApiResponse({ type: ResponseEntity })
+            async save(): Promise<ResponseEntity<string>> {
+            return ResponseEntity.OK();
+          }
+        }
+
+        export class ResponseEntity<T> {
+           @ApiOperation({ summary: '' })
+            @ApiResponse({ type: ResponseEntity })
+            static OK(): ResponseEntity<string> {
+            return new ResponseEntity<string>(ResponseStatus.OK, '', '');
+          }
+        }
+        "
+      `);
+    });
+
+    it('응답 타입이 Promise<U<T>> 타입이면 T 타입을 반환한다.', () => {
+      const content = `
+export class UserController {
+  async save(): Promise<ResponseEntity<UserResponse>> {
+    return new ResponseEntity<UserResponse>();
+  }
+}
+
+class UserResponse {}
+
+class ResponseEntity<T> {}
+
+`;
+      const generator = new SwaggerGenerator('controller.ts', content);
+
+      // when
+      generator.addSwaggerToApi();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiOperation } from "@nestjs/swagger";
+        import { ApiOkResponseBy } from "@app/web-common/res/swagger/ApiOkResponseBy";
+
+        export class UserController {
+          @ApiOperation({ summary: '' })
+            @ApiOkResponseBy(UserResponse)
+            async save(): Promise<ResponseEntity<UserResponse>> {
+            return new ResponseEntity<UserResponse>();
+          }
+        }
+
+        class UserResponse {}
+
+        class ResponseEntity<T> {}
+
+        "
+      `);
+    });
+
+    it('응답 타입이 Promise<R<U<T>>>> 타입이면 T 타입을 반환한다.', () => {
+      const content = `
+export class UserController {
+  async save(): Promise<ResponseEntity<Page<UserResponse>>> {
+    const response = [new UserResponse()];
+    
+    return new Page<UserResponse>(response);
+  }
+}
+
+class UserResponse {}
+
+class ResponseEntity<T> {}
+
+class Page<T> {
+  items: T[];
+  constructor(items: T[]) {
+    this.items = items;
+   }
+}
+`;
+      const generator = new SwaggerGenerator('controller.ts', content);
+
+      // when
+      generator.addSwaggerToApi();
+
+      // then
+      const text = generator.text()[0];
+      expect(text).toMatchInlineSnapshot(`
+        "import { ApiOperation } from "@nestjs/swagger";
+        import { ApiPaginateResponse } from "@app/web-common/res/swagger/ApiOkResponseBy";
+
+        export class UserController {
+          @ApiOperation({ summary: '' })
+            @ApiPaginateResponse(UserResponse)
+            async save(): Promise<ResponseEntity<Page<UserResponse>>> {
+            const response = [new UserResponse()];
+            
+            return new Page<UserResponse>(response);
+          }
+        }
+
+        class UserResponse {}
+
+        class ResponseEntity<T> {}
+
+        class Page<T> {
+          items: T[];
+          constructor(items: T[]) {
+            this.items = items;
+           }
+        }
+        "
       `);
     });
   });
