@@ -1,21 +1,22 @@
 import { BuyerFactory } from '../../../../libs/entity/test/factory/BuyerFactory';
 import { Test } from '@nestjs/testing';
 import { getPgRealTypeOrmModule } from '@app/entity/getRealTypeOrmModule';
-import { EntityModule } from '@app/entity/EntityModule';
 import { EntityManager } from 'typeorm';
 import { BuyerRepository } from '../../src/buyer/BuyerRepository';
 import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType';
 import { Buyer } from '@app/entity/domain/buyer/Buyer.entity';
+import { getTestModule } from '../../../../libs/web-common/test/util/getTestModule';
 
 describe('BuyerRepository', () => {
   let buyerRepository: BuyerRepository;
   let buyerFactory: BuyerFactory;
 
   beforeAll(async () => {
-    const module = await Test.createTestingModule({
-      imports: [getPgRealTypeOrmModule(), EntityModule],
-      providers: [BuyerRepository],
-    }).compile();
+    const module = await Test.createTestingModule(
+      getTestModule(BuyerRepository, {
+        imports: [getPgRealTypeOrmModule()],
+      }),
+    ).compile();
 
     const em = module.get(EntityManager);
     buyerRepository = module.get(BuyerRepository);
