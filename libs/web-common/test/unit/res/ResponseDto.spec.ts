@@ -1,4 +1,4 @@
-import { ResponseDto } from '../../src/res/ResponseDto';
+import { ResponseDto } from '../../../src/res/ResponseDto';
 import { Expose, instanceToPlain } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { DECORATORS } from '@nestjs/swagger/dist/constants';

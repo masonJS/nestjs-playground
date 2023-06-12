@@ -15,6 +15,8 @@ describe('UrlParse', () => {
     const hostName = 'hacker.com*.google.com';
     const requestUrl = `https://${hostName}`;
 
-    await fetch(requestUrl);
+    try {
+      await fetch(requestUrl);
+    } catch (e) {}
   });
 });

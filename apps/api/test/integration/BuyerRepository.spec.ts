@@ -5,7 +5,7 @@ import { EntityManager } from 'typeorm';
 import { BuyerRepository } from '../../src/buyer/BuyerRepository';
 import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType';
 import { Buyer } from '@app/entity/domain/buyer/Buyer.entity';
-import { getTestModule } from '../../../../libs/web-common/test/util/getTestModule';
+import { getTestModule } from '../../../../libs/web-common/test/unit/getTestModule';
 
 describe('BuyerRepository', () => {
   let buyerRepository: BuyerRepository;
