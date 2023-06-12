@@ -38,6 +38,8 @@
     "got": "^11.8.2",
     "js-yaml": "^4.1.0",
     "node-fetch": "2",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^3.7.107",
     "pg": "^8.9.0",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.2.0",
@@ -102,7 +104,8 @@
       "^@app/entity(|/.*)$": "<rootDir>/libs/entity/src/$1",
       "^@app/config(|/.*)$": "<rootDir>/libs/config/src/$1",
       "^@app/logger(|/.*)$": "<rootDir>/libs/logger/src/$1",
-      "^@app/web-client(|/.*)$": "<rootDir>/libs/web-client/src/$1"
+      "^@app/web-client(|/.*)$": "<rootDir>/libs/web-client/src/$1",
+      "^@app/file-manager(|/.*)$": "<rootDir>/libs/file-manager/src/$1"
     }
   },
   "lint-staged": {

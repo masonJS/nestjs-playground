@@ -53,6 +53,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/web-client/tsconfig.lib.json"
       }
+    },
+    "file-manager": {
+      "type": "library",
+      "root": "libs/file-manager",
+      "entryFile": "index",
+      "sourceRoot": "libs/file-manager/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/file-manager/tsconfig.lib.json"
+      }
     }
   }
 }
