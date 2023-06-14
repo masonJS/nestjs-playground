@@ -10,7 +10,7 @@ function toBeBetween(actual: number, min: number, max: number) {
 }
 
 function toBeTrue(actual: boolean) {
-  const pass = actual;
+  const pass = actual === true;
 
   return {
     pass,
@@ -21,7 +21,7 @@ function toBeTrue(actual: boolean) {
 }
 
 function toBeFalse(actual: boolean) {
-  const pass = !actual;
+  const pass = actual === false;
 
   return {
     pass,
