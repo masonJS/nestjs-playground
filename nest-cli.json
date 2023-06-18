@@ -62,6 +62,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/file-manager/tsconfig.lib.json"
       }
+    },
+    "event-publisher": {
+      "type": "library",
+      "root": "libs/event-publisher",
+      "entryFile": "index",
+      "sourceRoot": "libs/event-publisher/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/event-publisher/tsconfig.lib.json"
+      }
     }
   }
 }
