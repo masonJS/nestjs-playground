@@ -53,6 +53,12 @@
       ],
       "@app/file-manager/*": [
         "libs/file-manager/src/*"
+      ],
+      "@app/event-publisher": [
+        "libs/event-publisher/src"
+      ],
+      "@app/event-publisher/*": [
+        "libs/event-publisher/src/*"
       ]
     }
   }
