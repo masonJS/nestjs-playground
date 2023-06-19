@@ -24,6 +24,7 @@
     "swagger-generate": "jest swagger.generator.spec.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.354.0",
     "@aws-sdk/client-sns": "^3.354.0",
     "@js-joda/core": "^5.5.2",
     "@nestjs/common": "^9.0.0",
@@ -110,7 +111,8 @@
       "^@app/logger(|/.*)$": "<rootDir>/libs/logger/src/$1",
       "^@app/web-client(|/.*)$": "<rootDir>/libs/web-client/src/$1",
       "^@app/file-manager(|/.*)$": "<rootDir>/libs/file-manager/src/$1",
-      "^@app/event-publisher(|/.*)$": "<rootDir>/libs/event-publisher/src/$1"
+      "^@app/event-publisher(|/.*)$": "<rootDir>/libs/event-publisher/src/$1",
+      "^@app/file-storage(|/.*)$": "<rootDir>/libs/file-storage/src/$1"
     }
   },
   "lint-staged": {

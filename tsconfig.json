@@ -59,6 +59,12 @@
       ],
       "@app/event-publisher/*": [
         "libs/event-publisher/src/*"
+      ],
+      "@app/file-storage": [
+        "libs/file-storage/src"
+      ],
+      "@app/file-storage/*": [
+        "libs/file-storage/src/*"
       ]
     }
   }
