@@ -18,6 +18,7 @@ export class EventPublisherService {
 
       await this.snsClient.send(command);
     } catch (e) {
+      this.logger.info('test2');
       this.logger.error(
         `EventPublisherService publish Exception: topicArn=${topicArn}, message=${message}`,
         e,
