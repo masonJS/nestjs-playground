@@ -22,11 +22,11 @@ describe('Configuration', () => {
     expect(dbEnv).toMatchInlineSnapshot(`
       DatabaseEnvironment {
         "connectTimeoutMS": 5000,
-        "database": "test",
         "idleInTransactionSessionTimeout": 30000,
         "masterHost": "localhost",
+        "name": "test",
         "password": "test",
-        "port": 5432,
+        "port": 5434,
         "readerHost": "localhost",
         "statementTimeout": 5000,
         "user": "test",
