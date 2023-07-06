@@ -34,6 +34,7 @@ export class FileStorageService {
 
     if (response.isNotOK) {
       throw new Error(`s3 file upload error: message = ${response.message}`);
+      throw new Error(`s3 file upload error: message = ${response.message}`);
     }
   }
 }
