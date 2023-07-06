@@ -1,10 +1,10 @@
-import { Environment } from './env/Environment';
 import * as yaml from 'js-yaml';
 import { readFileSync } from 'fs';
 import * as process from 'process';
 import { plainToClass } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { ConfigModule } from '@nestjs/config';
+import { Environment } from '@app/config/env/Environment';
 
 export class Configuration {
   static getModule() {
@@ -14,6 +14,7 @@ export class Configuration {
       load: [() => Configuration.getEnv()],
     });
   }
+
   static getEnv(nodeEnv?: string): Environment {
     const environment = this.getEnvByYml(nodeEnv);
     this.validate(environment);
