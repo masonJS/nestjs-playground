@@ -54,4 +54,13 @@ jobs:
       - name: Run test
         run: yarn test:ci
 
+      - name: notify failure alarm
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2.0.0
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: 'danger'
+          SLACK_TITLE: 'Build Failure'
+          SLACK_MESSAGE: 'The build and deployment process failed.'
+
 
