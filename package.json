@@ -18,6 +18,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./apps/nestjs-playground/test/jest-e2e.json",
+    "test:ci": "jest --coverage --coverageDirectory=coverage",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/.bin/typeorm -d scripts/migration/MigrationConfig.ts",
     "migrate": "yarn typeorm migration:run",
     "migration-generate": "yarn typeorm migration:generate ./scripts/migration/Migration --pretty && yarn eslint --fix ./scripts/migration",
