@@ -2,9 +2,7 @@ name: auto-rebase
 
 on:
   push:
-    branches:
-      - main
-
+    branches: [ main ]
 jobs:
   rebase:
     runs-on: ubuntu-latest
