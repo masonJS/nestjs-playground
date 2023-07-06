@@ -22,6 +22,7 @@ export class FileStorageService {
 
       await this.putFileToS3(command);
     } catch (e) {
+      this.logger.info('test3');
       this.logger.error(`s3 file upload error `, e);
       throw e;
     }
