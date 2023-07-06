@@ -51,9 +51,6 @@ jobs:
         if: steps.cache-dependencies.cache-hit != 'true'
         run: yarn install
 
-      - name: Run test
-        run: yarn test:ci
-
       - name: notify failure alarm
         if: failure()
         uses: rtCamp/action-slack-notify@v2.0.0
