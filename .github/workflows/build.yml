@@ -58,7 +58,7 @@ jobs:
         if: failure()
         uses: rtCamp/action-slack-notify@v2.0.0
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_WEBHOOK: 'https://hooks.slack.com/services/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'
           SLACK_COLOR: 'danger'
           SLACK_TITLE: 'Build Failure'
           SLACK_MESSAGE: 'The build and deployment process failed.'
