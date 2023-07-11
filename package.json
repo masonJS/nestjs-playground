@@ -31,6 +31,7 @@
     "@nestjs/common": "^9.0.0",
     "@nestjs/config": "^2.3.1",
     "@nestjs/core": "^9.0.0",
+    "@nestjs/event-emitter": "^2.0.0",
     "@nestjs/platform-express": "^9.0.0",
     "@nestjs/swagger": "^6.2.1",
     "@nestjs/typeorm": "^9.0.1",
@@ -114,7 +115,8 @@
       "^@app/file-manager(|/.*)$": "<rootDir>/libs/file-manager/src/$1",
       "^@app/event-publisher(|/.*)$": "<rootDir>/libs/event-publisher/src/$1",
       "^@app/file-storage(|/.*)$": "<rootDir>/libs/file-storage/src/$1",
-      "^@app/event-listener(|/.*)$": "<rootDir>/libs/event-listener/src/$1"
+      "^@app/event-listener(|/.*)$": "<rootDir>/libs/event-listener/src/$1",
+      "^@app/event-emitter(|/.*)$": "<rootDir>/libs/event-emitter/src/$1"
     }
   },
   "lint-staged": {
