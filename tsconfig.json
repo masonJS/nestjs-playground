@@ -71,6 +71,12 @@
       ],
       "@app/event-listener/*": [
         "libs/event-listener/src/*"
+      ],
+      "@app/event-emitter": [
+        "libs/event-emitter/src"
+      ],
+      "@app/event-emitter/*": [
+        "libs/event-emitter/src/*"
       ]
     }
   }
