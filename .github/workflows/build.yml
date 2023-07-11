@@ -61,7 +61,6 @@ jobs:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           SLACK_COLOR: 'danger'
           SLACK_TITLE: 'Build Failure'
-          SLACK_MESSAGE: 'The build and deployment process failed.'
           SLACK_ICON: https://cdn.rallit.com/image/2022-10-28/cIX_VGiCDs947_clP_nj_.png
 
 

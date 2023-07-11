@@ -113,7 +113,8 @@
       "^@app/web-client(|/.*)$": "<rootDir>/libs/web-client/src/$1",
       "^@app/file-manager(|/.*)$": "<rootDir>/libs/file-manager/src/$1",
       "^@app/event-publisher(|/.*)$": "<rootDir>/libs/event-publisher/src/$1",
-      "^@app/file-storage(|/.*)$": "<rootDir>/libs/file-storage/src/$1"
+      "^@app/file-storage(|/.*)$": "<rootDir>/libs/file-storage/src/$1",
+      "^@app/event-listener(|/.*)$": "<rootDir>/libs/event-listener/src/$1"
     }
   },
   "lint-staged": {

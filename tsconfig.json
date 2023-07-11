@@ -65,6 +65,12 @@
       ],
       "@app/file-storage/*": [
         "libs/file-storage/src/*"
+      ],
+      "@app/event-listener": [
+        "libs/event-listener/src"
+      ],
+      "@app/event-listener/*": [
+        "libs/event-listener/src/*"
       ]
     }
   }

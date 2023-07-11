@@ -80,6 +80,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/file-storage/tsconfig.lib.json"
       }
+    },
+    "event-listener": {
+      "type": "library",
+      "root": "libs/event-listener",
+      "entryFile": "index",
+      "sourceRoot": "libs/event-listener/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/event-listener/tsconfig.lib.json"
+      }
     }
   }
 }
