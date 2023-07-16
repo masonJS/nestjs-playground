@@ -8,7 +8,7 @@
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
-    "start": "nest start api",
+    "start": "nest start api --watch",
     "start:dev": "nest start api --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/apps/nestjs-playground/main",
