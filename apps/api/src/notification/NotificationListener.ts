@@ -1,13 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
 import { BuyerFindOneEvent } from '../buyer/event/BuyerFindOneEvent';
+import { OnEventLogging } from '@app/event-emitter/decorator/OnEventLogging';
+import { Logger } from '@app/logger/Logger';
 
 @Injectable()
 export class NotificationListener {
-  @OnEvent(BuyerFindOneEvent.name, { async: true })
-  async listen() {
-    try {
-      throw new Error('event Error');
-    } catch (e) {}
+  constructor(private readonly logger: Logger) {}
+
+  @OnEventLogging(BuyerFindOneEvent.name, { async: true })
+  async listen(event: BuyerFindOneEvent) {
+    this.logger.info('NotificationListener.listen');
+    this.logger.info('event: ' + JSON.stringify(event));
+    throw new Error('event Error');
   }
 }
