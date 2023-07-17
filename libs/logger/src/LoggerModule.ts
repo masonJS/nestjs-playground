@@ -58,7 +58,10 @@ export class LoggerModule implements OnModuleInit {
       try {
         return await methodProtoType.apply(instance, args);
       } catch (e) {
-        this.logger.error(e.message, e);
+        this.logger.error(
+          `${instance.constructor.name}.${method}: ${e.message}`,
+          e,
+        );
       }
     };
 
