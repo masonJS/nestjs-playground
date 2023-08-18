@@ -2,7 +2,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SnakeNamingStrategy } from '@app/entity/config/SnakeNamingStrategy';
 import { Configuration } from '@app/config/Configuration';
 
-export function getPgRealTypeOrmModule() {
+export function getRealDBModule() {
   const database = Configuration.getEnv().database;
 
   return TypeOrmModule.forRoot({
