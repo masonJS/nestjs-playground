@@ -20,4 +20,4 @@ services:
     volumes:
       - "./scripts/localstack:/docker-entrypoint-initaws.d"
     environment:
-      - SERVICES=sns
+      - SERVICES=sns,s3
