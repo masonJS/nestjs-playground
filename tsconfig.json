@@ -77,6 +77,12 @@
       ],
       "@app/event-emitter/*": [
         "libs/event-emitter/src/*"
+      ],
+      "@app/mailer": [
+        "libs/mailer/src"
+      ],
+      "@app/mailer/*": [
+        "libs/mailer/src/*"
       ]
     }
   }

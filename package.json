@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.354.0",
+    "@aws-sdk/client-ses": "^3.410.0",
     "@aws-sdk/client-sns": "^3.354.0",
     "@js-joda/core": "^5.5.2",
     "@nestjs/common": "^9.0.0",
@@ -118,7 +119,8 @@
       "^@app/event-publisher(|/.*)$": "<rootDir>/libs/event-publisher/src/$1",
       "^@app/file-storage(|/.*)$": "<rootDir>/libs/file-storage/src/$1",
       "^@app/event-listener(|/.*)$": "<rootDir>/libs/event-listener/src/$1",
-      "^@app/event-emitter(|/.*)$": "<rootDir>/libs/event-emitter/src/$1"
+      "^@app/event-emitter(|/.*)$": "<rootDir>/libs/event-emitter/src/$1",
+      "^@app/mailer(|/.*)$": "<rootDir>/libs/mailer/src/$1"
     }
   },
   "lint-staged": {
