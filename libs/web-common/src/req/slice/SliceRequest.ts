@@ -7,12 +7,12 @@ export class SliceRequest {
   @ApiProperty({ type: Number })
   static DEFAULT_SLICE_SIZE = 10;
 
-  @Type(() => Number)
   @ApiProperty({ type: Number })
+  @Type(() => Number)
   sliceSize: number = SliceRequest.DEFAULT_SLICE_SIZE;
 
-  @Type(() => Number)
   @ApiProperty({ type: Number, required: false })
+  @Type(() => Number)
   lastId?: number;
 
   get limit(): number {

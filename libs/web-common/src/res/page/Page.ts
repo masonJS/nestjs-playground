@@ -1,4 +1,4 @@
-import { ResponseDto } from '../ResponseDto';
+import { ResponseDto } from '../../decorator/ResponseDto';
 import { ApiProperty } from '@nestjs/swagger';
 
 @ResponseDto()

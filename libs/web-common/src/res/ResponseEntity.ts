@@ -1,5 +1,5 @@
 import { ResponseStatus } from './ResponseStatus';
-import { ResponseDto } from './ResponseDto';
+import { ResponseDto } from '../decorator/ResponseDto';
 
 @ResponseDto()
 export class ResponseEntity<T> {

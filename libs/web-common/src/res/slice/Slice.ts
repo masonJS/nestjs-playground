@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ResponseDto } from '../ResponseDto';
+import { ResponseDto } from '../../decorator/ResponseDto';
 
 @ResponseDto()
 export class Slice<T> {

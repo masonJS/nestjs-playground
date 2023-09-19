@@ -1,6 +1,6 @@
 import { validate } from 'class-validator';
 import { plainToClass } from 'class-transformer';
-import { PageRequest } from '../../src/req/PageRequest';
+import { PageRequest } from '../../src/req/page/PageRequest';
 
 describe('PageRequest', () => {
   describe('pageNumber', () => {
@@ -74,12 +74,11 @@ describe('PageRequest', () => {
       expect(pageRequest.pageNumber).toBeNaN();
       expect(pageNumberErrors).toHaveLength(1);
       expect(pageNumberErrors[0].constraints).toMatchInlineSnapshot(`
-      {
-        "isInt": "pageNumber must be an integer number",
-        "max": "pageNumber must not be greater than 9007199254740991",
-        "min": "pageNumber must not be less than 1",
-      }
-    `);
+        {
+          "isInt": "pageNumber must be an integer number",
+          "min": "pageNumber must not be less than 1",
+        }
+      `);
     });
   });
 
@@ -152,12 +151,11 @@ describe('PageRequest', () => {
       expect(pageRequest.pageSize).toBeNaN();
       expect(pageSizeErrors).toHaveLength(1);
       expect(pageSizeErrors[0].constraints).toMatchInlineSnapshot(`
-      {
-        "isInt": "pageSize must be an integer number",
-        "max": "pageSize must not be greater than 9007199254740991",
-        "min": "pageSize must not be less than 1",
-      }
-    `);
+        {
+          "isInt": "pageSize must be an integer number",
+          "min": "pageSize must not be less than 1",
+        }
+      `);
     });
   });
 });
