@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, Min } from 'class-validator';
+import { IsPositiveInt } from '../../decorator/IsPositiveInt';
 
 export class PageRequest {
   private static DEFAULT_PAGE_NUMBER = 1;
@@ -8,14 +8,12 @@ export class PageRequest {
 
   @ApiProperty({ required: true, example: PageRequest.DEFAULT_PAGE_NUMBER })
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsPositiveInt()
   pageNumber = PageRequest.DEFAULT_PAGE_NUMBER;
 
   @ApiProperty({ required: true, example: PageRequest.DEFAULT_PAGE_SIZE })
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsPositiveInt()
   pageSize = PageRequest.DEFAULT_PAGE_SIZE;
 
   get offset(): number {

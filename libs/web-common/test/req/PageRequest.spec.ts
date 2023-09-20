@@ -76,6 +76,7 @@ describe('PageRequest', () => {
       expect(pageNumberErrors[0].constraints).toMatchInlineSnapshot(`
         {
           "isInt": "pageNumber must be an integer number",
+          "max": "pageNumber must not be greater than 9007199254740991",
           "min": "pageNumber must not be less than 1",
         }
       `);
@@ -153,6 +154,7 @@ describe('PageRequest', () => {
       expect(pageSizeErrors[0].constraints).toMatchInlineSnapshot(`
         {
           "isInt": "pageSize must be an integer number",
+          "max": "pageSize must not be greater than 9007199254740991",
           "min": "pageSize must not be less than 1",
         }
       `);
