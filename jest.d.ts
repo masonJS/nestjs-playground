@@ -8,6 +8,8 @@ declare global {
       toBeFalse(): R;
 
       toBeEmpty(): R;
+
+      toMatchValidateErrorInlineSnapshot(property: string, snapshot: string): R;
     }
   }
 }

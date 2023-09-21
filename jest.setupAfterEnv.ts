@@ -1,3 +1,6 @@
+import { ValidationError } from 'class-validator';
+import { toMatchInlineSnapshot } from 'jest-snapshot';
+
 function toBeBetween(actual: number, min: number, max: number) {
   const pass = actual >= min && actual <= max;
 
@@ -47,4 +50,19 @@ expect.extend({
   toBeTrue,
   toBeFalse,
   toBeEmpty,
+  async toMatchValidateErrorInlineSnapshot(
+    actual: ValidationError[],
+    property: string,
+    ...rest
+  ) {
+    const validateErrors = actual.filter(
+      (error) => error.property === property,
+    );
+
+    return await toMatchInlineSnapshot.call(
+      this as any,
+      validateErrors[0].constraints,
+      ...rest,
+    );
+  },
 });
