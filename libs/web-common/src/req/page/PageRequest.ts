@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsPositiveInt } from '../../decorator/IsPositiveInt';
+import { IsPositiveInt } from '../../decorator/validate/IsPositiveInt';
 
 export class PageRequest {
   private static DEFAULT_PAGE_NUMBER = 1;

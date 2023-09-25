@@ -1,7 +1,7 @@
 import { RequestDto } from '../../decorator/RequestDto';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-import { IsPositiveInt } from '../../decorator/IsPositiveInt';
+import { IsPositiveInt } from '../../decorator/validate/IsPositiveInt';
 
 @RequestDto()
 export class SliceRequest {

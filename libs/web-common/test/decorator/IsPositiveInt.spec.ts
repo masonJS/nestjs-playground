@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { plainToClass } from 'class-transformer';
 import { validate } from 'class-validator';
-import { IsPositiveInt } from '../../src/decorator/IsPositiveInt';
+import { IsPositiveInt } from '../../src/decorator/validate/IsPositiveInt';
 
 describe('IsPositiveInt', () => {
   it('양의 정수(1 ~ Number.MAX_SAFE_INTEGER) 타입인지 유효성 체크를 한다.', async () => {
