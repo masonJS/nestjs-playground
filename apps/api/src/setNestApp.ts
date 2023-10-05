@@ -8,6 +8,7 @@ import { VersioningType } from '@nestjs/common/enums/version-type.enum';
 import { Logger } from '@app/logger/Logger';
 import { GlobalExceptionFilter } from '../../../libs/web-common/src/filter/GlobalExceptionFilter';
 import { DomainExceptionFilter } from '../../../libs/web-common/src/filter/DomainExceptionFilter';
+import { ClsMiddleware } from '../../../libs/web-common/src/app/ClsMiddleware';
 
 export function setNestApp<T extends INestApplication>(app: T): void {
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
@@ -20,4 +21,6 @@ export function setNestApp<T extends INestApplication>(app: T): void {
   app.enableVersioning({
     type: VersioningType.URI,
   });
+
+  app.use(ClsMiddleware);
 }

@@ -1,4 +1,5 @@
 import { format, transports } from 'winston';
+import { getTransactionId } from '../../web-common/src/app/ClsMiddleware';
 
 export function getWinstonLoggerOption(nodeEnv = process.env.NODE_ENV) {
   const isLocalEnv = nodeEnv === 'local';
@@ -33,6 +34,7 @@ function getProductionFormat() {
     format.printf((info) =>
       JSON.stringify({
         ...info,
+        transactionId: getTransactionId(),
       }),
     ),
   );
