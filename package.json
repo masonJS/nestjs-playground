@@ -122,7 +122,8 @@
       "^@app/file-storage(|/.*)$": "<rootDir>/libs/file-storage/src/$1",
       "^@app/event-listener(|/.*)$": "<rootDir>/libs/event-listener/src/$1",
       "^@app/event-emitter(|/.*)$": "<rootDir>/libs/event-emitter/src/$1",
-      "^@app/mailer(|/.*)$": "<rootDir>/libs/mailer/src/$1"
+      "^@app/mailer(|/.*)$": "<rootDir>/libs/mailer/src/$1",
+      "^@app/template(|/.*)$": "<rootDir>/libs/template/src/$1"
     }
   },
   "lint-staged": {

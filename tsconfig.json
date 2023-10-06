@@ -83,6 +83,12 @@
       ],
       "@app/mailer/*": [
         "libs/mailer/src/*"
+      ],
+      "@app/template": [
+        "libs/template/src"
+      ],
+      "@app/template/*": [
+        "libs/template/src/*"
       ]
     }
   }
