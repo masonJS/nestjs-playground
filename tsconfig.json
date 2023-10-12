@@ -89,6 +89,12 @@
       ],
       "@app/template/*": [
         "libs/template/src/*"
+      ],
+      "@app/chat-gpt": [
+        "libs/chat-gpt/src"
+      ],
+      "@app/chat-gpt/*": [
+        "libs/chat-gpt/src/*"
       ]
     }
   }

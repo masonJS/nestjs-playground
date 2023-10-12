@@ -116,6 +116,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/template/tsconfig.lib.json"
       }
+    },
+    "chat-gpt": {
+      "type": "library",
+      "root": "libs/chat-gpt",
+      "entryFile": "index",
+      "sourceRoot": "libs/chat-gpt/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/chat-gpt/tsconfig.lib.json"
+      }
     }
   }
 }
