@@ -125,6 +125,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/chat-gpt/tsconfig.lib.json"
       }
+    },
+    "crypto": {
+      "type": "library",
+      "root": "libs/crypto",
+      "entryFile": "index",
+      "sourceRoot": "libs/crypto/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/crypto/tsconfig.lib.json"
+      }
     }
   }
 }

@@ -95,6 +95,12 @@
       ],
       "@app/chat-gpt/*": [
         "libs/chat-gpt/src/*"
+      ],
+      "@app/crypto": [
+        "libs/crypto/src"
+      ],
+      "@app/crypto/*": [
+        "libs/crypto/src/*"
       ]
     }
   }

@@ -4,6 +4,7 @@ import { Type } from 'class-transformer';
 import { SnsEnvironment } from '@app/config/env/SnsEnvironment';
 import { S3Environment } from '@app/config/env/S3Environment';
 import { ChatGPTEnvironment } from '@app/config/env/ChatGPTEnvironment';
+import { CryptoEnvironment } from '@app/config/env/CryptoEnvironment';
 
 export class Environment {
   @ValidateNested()
@@ -25,4 +26,9 @@ export class Environment {
   @IsNotEmpty()
   @Type(() => ChatGPTEnvironment)
   chatGPT: ChatGPTEnvironment;
+
+  @ValidateNested()
+  @IsNotEmpty()
+  @Type(() => CryptoEnvironment)
+  crypto: CryptoEnvironment;
 }
