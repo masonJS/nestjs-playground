@@ -26,6 +26,7 @@
     "release": "./scripts/github/release.sh"
   },
   "dependencies": {
+    "@aws-crypto/client-node": "^4.0.0",
     "@aws-sdk/client-s3": "^3.354.0",
     "@aws-sdk/client-ses": "^3.410.0",
     "@aws-sdk/client-sns": "^3.354.0",
