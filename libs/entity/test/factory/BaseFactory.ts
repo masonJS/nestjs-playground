@@ -10,14 +10,14 @@ import { faker } from '@faker-js/faker';
 import { LocalDateTime, LocalTime } from '@js-joda/core';
 
 export declare type Constructor<T = unknown> = new (...args: any[]) => T;
+
 export abstract class BaseFactory<Entity extends ObjectLiteral> {
   protected abstract entity: Constructor<Entity>;
+
   constructor(public entityManager: EntityManager) {}
 
-  abstract toEntity(entity: DeepPartial<Entity>): Entity;
-
-  async save(entity: DeepPartial<Entity>) {
-    return this.entityManager.save(this.toEntity(entity));
+  async save(entity?: DeepPartial<Entity>) {
+    return this.entityManager.save(this.makeOne(entity));
   }
 
   async findOne(options: FindOneOptions<Entity>): Promise<Entity> {
@@ -27,6 +27,8 @@ export abstract class BaseFactory<Entity extends ObjectLiteral> {
   async clear(): Promise<void> {
     return this.entityManager.clear(this.entity);
   }
+
+  protected abstract makeOne(entity?: DeepPartial<Entity>): Entity;
 
   protected fakeColumns<Entity>(entity: Entity) {
     const fakeColumns: Record<string, any> = {};

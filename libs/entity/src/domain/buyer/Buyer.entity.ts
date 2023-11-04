@@ -26,6 +26,9 @@ export class Buyer extends BaseEntity {
   @Column('varchar', { length: 20 })
   receiveAlarmType: ReceiveAlarmType;
 
+  @Column('int', { default: 0 })
+  accessCount: number;
+
   static create(
     email: string,
     password: string,

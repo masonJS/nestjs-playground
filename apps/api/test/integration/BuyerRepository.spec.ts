@@ -25,7 +25,7 @@ describe('BuyerRepository', () => {
 
   beforeEach(async () => buyerFactory.clear());
 
-  it('test', async () => {
+  it('create Test', async () => {
     // given
     const buyer = Buyer.create(
       'email',
@@ -42,5 +42,18 @@ describe('BuyerRepository', () => {
     // then
     const result = await buyerFactory.findOne({ where: { id: buyer.id } });
     expect(result.email).toBe('email');
+  });
+
+  it('updateAccessCount Test', async () => {
+    // given
+    const buyer = await buyerFactory.save({
+      accessCount: 11,
+    });
+
+    // when
+    const result = await buyerRepository.updateAndReturnAccessCount(buyer.id);
+
+    // then
+    expect(result).toBe(11 + 1);
   });
 });
