@@ -3,6 +3,7 @@ import { EntityModule } from '@app/entity/EntityModule';
 import { BuyerFactory } from './factory/BuyerFactory';
 import { EntityManager } from 'typeorm';
 import { getRealDBModule } from '@app/entity/getRealDBModule';
+import { Phone } from '@app/entity/domain/buyer/Phone';
 
 describe('BuyerFactory', () => {
   let buyerFactory: BuyerFactory;
@@ -19,10 +20,10 @@ describe('BuyerFactory', () => {
   it('test', async () => {
     // given, when
     const buyer = await buyerFactory.save({
-      countryNumber: '82',
+      phone: Phone.create('82', '01012345678'),
     });
 
     // then
-    expect(buyer.countryNumber).toBe('82');
+    expect(buyer.phone.phoneNumber).toBe('01012345678');
   });
 });

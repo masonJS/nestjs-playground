@@ -1,6 +1,8 @@
 import { Column, Entity } from 'typeorm';
 import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType';
 import { BaseEntity } from '@app/entity/domain/BaseEntity';
+import { JsonTransformer } from '@app/entity/transformer/JsonTransformer';
+import { Phone } from '@app/entity/domain/buyer/Phone';
 
 @Entity()
 export class Buyer extends BaseEntity {
@@ -13,11 +15,13 @@ export class Buyer extends BaseEntity {
   @Column('varchar', { length: 255 })
   name: string;
 
-  @Column('varchar', { length: 5 })
-  countryNumber: string;
-
-  @Column('varchar', { length: 20 })
-  phoneNumber: string;
+  @Column({
+    type: 'jsonb',
+    default: {},
+    comment: '휴대폰 번호',
+    transformer: new JsonTransformer(Phone),
+  })
+  phone: Phone;
 
   @Column('varchar', { length: 20 })
   receiveAlarmType: ReceiveAlarmType;
@@ -34,8 +38,7 @@ export class Buyer extends BaseEntity {
     buyer.email = email;
     buyer.password = password;
     buyer.name = name;
-    buyer.countryNumber = countryNumber;
-    buyer.phoneNumber = phoneNumber;
+    buyer.phone = Phone.create(countryNumber, phoneNumber);
     buyer.receiveAlarmType = receiveAlarmType;
     return buyer;
   }
