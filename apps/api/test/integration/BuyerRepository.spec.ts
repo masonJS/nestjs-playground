@@ -44,6 +44,28 @@ describe('BuyerRepository', () => {
     expect(result.email).toBe('email');
   });
 
+  it('createOrUpdate Test', async () => {
+    // given
+    const buyer = Buyer.create(
+      'email',
+      'password',
+      'name',
+      '82',
+      '01012345678',
+      ReceiveAlarmType.ALL,
+    );
+
+    // when
+    await Promise.all([
+      buyerRepository.createOrUpdate(buyer),
+      buyerRepository.createOrUpdate(buyer),
+    ]);
+
+    // then
+    const result = await buyerFactory.entityManager.count(Buyer);
+    expect(result).toBe(1);
+  });
+
   it('updateAccessCount Test', async () => {
     // given
     const buyer = await buyerFactory.save({

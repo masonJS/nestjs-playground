@@ -16,6 +16,15 @@ export class BuyerRepository {
     await this.buyerRepository.save(buyer);
   }
 
+  async createOrUpdate(buyer: Buyer) {
+    return await this.manager
+      .createQueryBuilder(Buyer, 'buyer')
+      .insert()
+      .values(buyer)
+      .orUpdate(['updated_at'], ['email'])
+      .execute();
+  }
+
   async updateAndReturnAccessCount(id: number) {
     return await this.manager
       .createQueryBuilder()

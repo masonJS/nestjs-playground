@@ -1,10 +1,11 @@
-import { Column, Entity } from 'typeorm';
+import { Column, Entity, Unique } from 'typeorm';
 import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType';
 import { BaseEntity } from '@app/entity/domain/BaseEntity';
 import { JsonTransformer } from '@app/entity/transformer/JsonTransformer';
 import { Phone } from '@app/entity/domain/buyer/Phone';
 
 @Entity()
+@Unique(['email'])
 export class Buyer extends BaseEntity {
   @Column('varchar', { length: 255 })
   email: string;
