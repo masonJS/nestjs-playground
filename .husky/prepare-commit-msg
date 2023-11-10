@@ -1,0 +1,20 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+COMMIT_EDIT_MSG=$1
+NAME=$(git branch | grep '*')
+
+
+addBranchName() {
+  BRANCH_NAME=$(echo "$NAME" | cut -d ' ' -f2)
+
+  PATTERN="^\[$BRANCH_NAME\]"
+
+  if [[ $(cat "$COMMIT_EDIT_MSG") =~ $PATTERN ]]; then
+    return
+  fi
+
+  echo "[$BRANCH_NAME] $(cat "$COMMIT_EDIT_MSG")" > "$COMMIT_EDIT_MSG"
+}
+
+addBranchName;
