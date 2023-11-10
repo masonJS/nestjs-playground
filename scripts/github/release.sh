@@ -29,7 +29,7 @@ if [ -z "$major" ] && [ -z "$minor" ] && [ -z "$patch" ]; then
 fi
 
 success "가장 최근 버전을 확인합니다."
-git fetch origin --tags || failure "태그 목록을 가져오지 못했습니다."
+git fetch root --tags || failure "태그 목록을 가져오지 못했습니다."
 currentVersion=$(git describe --tags $(git rev-list --tags --max-count=1))
 
 semver=(${currentVersion//./ })
@@ -65,10 +65,10 @@ git pull || failure "git pull 실행을 하지 못했습니다."
 git switch -c release/$newVersion  || failure "release 브랜치를 생성하지 못했습니다."
 
 success "main 브랜치와 리베이스합니다."
-git rebase origin/main || failure "리베이스를 실패하였습니다."
+git rebase root/main || failure "리베이스를 실패하였습니다."
 
 success "release 브랜치를 push합니다."
-git push --set-upstream origin release/$newVersion || failure "release 브랜치를 푸시하지 못했습니다."
+git push --set-upstream root release/$newVersion || failure "release 브랜치를 푸시하지 못했습니다."
 
 success "release PR을 생성합니다."
 
