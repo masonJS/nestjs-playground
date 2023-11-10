@@ -74,7 +74,12 @@ success "release PR을 생성합니다."
 
 isGhInstalled=$(which gh)
 if [ -n "$isGhInstalled" ]; then
-  gh pr create --web --title "Release $newVersion" --assignee "@me"
+  files=$(git diff root/main..root/release/1.1.0 --name-only | grep -E "^scripts/migration/.*\.ts$")
+  if [ -n "$files" ]; then
+    gh pr create --web --title "Release $newVersion" --assignee "@me" --body "## ✅변경된 DDL 파일들이 존재합니다 ### 운영 DB에 해당 수정사항을 반영했는지 확인해주세요! "
+  else
+    gh pr create --web --title "Release $newVersion" --assignee "@me"
+  fi
 else
   failure "gh cli가 설치되어 있지 않습니다."
 fi
