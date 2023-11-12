@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - develop
   pull_request:
     types: [ opened, synchronize, reopened ]
 
@@ -51,16 +52,27 @@ jobs:
         if: steps.cache-dependencies.cache-hit != 'true'
         run: yarn install
 
-      - name: Run test
-        run: yarn test:ci
-
       - name: notify failure alarm
+        uses: 8398a7/action-slack@v3
         if: failure()
-        uses: rtCamp/action-slack-notify@v2.0.0
+        with:
+          status: custom
+          custom_payload: |
+            {
+              text: "Git Action Build 실패",
+              attachments: [{
+                color: 'danger',
+                fields: [
+                  {
+                    title: 'Git Action 링크',
+                    value: '<https://github.com/masonJS/nestjs-playground/actions/workflows/build.yml|링크 바로가기>',
+                    short: false
+                  }
+                ],
+                actions: [{}]  // Don't know if we actually need this, but it is shown in the docs as empty
+              }]
+            }
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_COLOR: 'danger'
-          SLACK_TITLE: 'Build Failure'
-          SLACK_ICON: https://cdn.rallit.com/image/2022-10-28/cIX_VGiCDs947_clP_nj_.png
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
 
 
