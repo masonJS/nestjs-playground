@@ -2,7 +2,7 @@
 
 success() {
   echo ""
-  echo "### $@ ###"
+  echo "### $1 ###"
   echo ""
 }
 
@@ -29,9 +29,9 @@ if [ -z "$major" ] && [ -z "$minor" ] && [ -z "$patch" ]; then
 fi
 
 success "가장 최근 버전을 확인합니다."
+
 git fetch root --tags || failure "태그 목록을 가져오지 못했습니다."
 currentVersion=$(git describe --tags $(git rev-list --tags --max-count=1))
-
 semver=(${currentVersion//./ })
 
 if [ ${#semver[@]} -ne 3 ]; then
@@ -46,12 +46,12 @@ if [ -n "$major" ]; then
   semver[2]=0
 fi
 
-if [ -n "$minor"]; then
+if [ -n "$minor" ]; then
   ((semver[1]++))
   semver[2]=0
 fi
 
-if [ -n "$patch"]; then
+if [ -n "$patch" ]; then
   ((semver[2]++))
 fi
 
@@ -74,9 +74,9 @@ success "release PR을 생성합니다."
 
 isGhInstalled=$(which gh)
 if [ -n "$isGhInstalled" ]; then
-  files=$(git diff root/main..root/release/1.1.0 --name-only | grep -E "^scripts/migration/.*\.ts$")
+  files=$(git diff root/main..root/release/$newVersion --name-only | grep -E "^scripts/migration/.*\.ts$")
   if [ -n "$files" ]; then
-    gh pr create --web --title "Release $newVersion" --assignee "@me" --body "## ✅변경된 DDL 파일들이 존재합니다 ### 운영 DB에 해당 수정사항을 반영했는지 확인해주세요! "
+    gh pr create --web --title "Release $newVersion" --assignee "@me" --body "### ✅ 변경된 DDL 파일들이 존재합니다. 운영 DB에 해당 수정사항을 반영했는지 확인해주세요! "
   else
     gh pr create --web --title "Release $newVersion" --assignee "@me"
   fi
