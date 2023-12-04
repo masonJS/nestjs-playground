@@ -1,0 +1,28 @@
+name: Check Migration Changes
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-migration-changes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get changed files in the migration directory
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: scripts/migration/*-Migration.ts
+
+      - name: Leave a comment if migration files have changed
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: ${{ github.event.number }}
+          body: |
+            🚨마이그레이션 파일 변경이 감지되었습니다. 운영 DB에 적용되었는지 확인해주세요.
