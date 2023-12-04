@@ -16,7 +16,7 @@ services:
     image: localstack/localstack:0.14.1
     container_name: play_ground_localstack
     ports:
-      - "4567:4566"
+      - "4568:4566"
     volumes:
       - "./scripts/localstack:/docker-entrypoint-initaws.d"
     environment:
