@@ -101,6 +101,12 @@
       ],
       "@app/crypto/*": [
         "libs/crypto/src/*"
+      ],
+      "@app/notification-manager": [
+        "libs/notification-manager/src"
+      ],
+      "@app/notification-manager/*": [
+        "libs/notification-manager/src/*"
       ]
     }
   }

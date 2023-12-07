@@ -134,6 +134,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/crypto/tsconfig.lib.json"
       }
+    },
+    "notification-manager": {
+      "type": "library",
+      "root": "libs/notification-manager",
+      "entryFile": "index",
+      "sourceRoot": "libs/notification-manager/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/notification-manager/tsconfig.lib.json"
+      }
     }
   }
 }
