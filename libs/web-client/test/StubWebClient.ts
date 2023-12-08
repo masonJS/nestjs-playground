@@ -120,7 +120,7 @@ export class StubWebClient implements WebClient {
   ): this {
     this.responses.push({
       statusCode,
-      body: JSON.stringify(body),
+      body: this.parseBody(body),
     });
 
     return this;
