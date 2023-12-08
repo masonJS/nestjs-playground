@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { WebClientService } from '@app/web-client/creator/WebClientService';
 import { Logger } from '@app/logger/Logger';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
+import { SlackSenderDto } from '@app/notification-manager/slack/dto/SlackSenderDto';
 
 @Injectable()
 export class SlackSenderService {
@@ -10,10 +11,7 @@ export class SlackSenderService {
     private readonly webClientService: WebClientService,
   ) {}
 
-  async send(dto: {
-    url: string;
-    message: Record<string, any>;
-  }): Promise<string> {
+  async send(dto: SlackSenderDto): Promise<string> {
     try {
       const spec = await this.webClientService
         .create(dto.url)
