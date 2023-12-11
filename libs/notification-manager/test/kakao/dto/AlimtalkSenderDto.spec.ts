@@ -7,7 +7,7 @@ describe('AlimtalkSenderDto', () => {
     const dto = AlimtalkSenderDto.of('code', []);
 
     // when
-    const result = dto.toRequestBody;
+    const result = dto.toRequestBodies;
 
     // then
     expect(result).toBeEmpty();
@@ -24,7 +24,7 @@ describe('AlimtalkSenderDto', () => {
     );
 
     // when
-    const result = dto.toRequestBody;
+    const result = dto.toRequestBodies;
 
     // then
     expect(result).toHaveLength(1);
@@ -42,7 +42,7 @@ describe('AlimtalkSenderDto', () => {
     );
 
     // when
-    const result = dto.toRequestBody;
+    const result = dto.toRequestBodies;
 
     // then
     expect(result).toHaveLength(2);

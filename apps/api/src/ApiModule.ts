@@ -5,6 +5,7 @@ import { BuyerModule } from './buyer/BuyerModule';
 import { NotificationModule } from './notification/NotificationModule';
 import { LoggerModule } from '@app/logger/LoggerModule';
 import { CryptoModule } from '@app/crypto/CryptoModule';
+import { NotificationManagerModule } from '@app/notification-manager/NotificationManagerModule';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { CryptoModule } from '@app/crypto/CryptoModule';
     BuyerModule,
     NotificationModule,
     CryptoModule,
+    NotificationManagerModule,
   ],
 })
 export class ApiModule {}

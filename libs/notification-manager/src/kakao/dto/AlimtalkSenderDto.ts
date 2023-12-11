@@ -26,7 +26,7 @@ export class AlimtalkSenderDto {
     return [array.slice(0, size), ...this.chunkArray(array.slice(size), size)];
   }
 
-  get toRequestBody() {
+  get toRequestBodies() {
     if (this._recipients.length === 0) {
       return [];
     }
