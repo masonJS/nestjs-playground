@@ -5,6 +5,7 @@ import { SnsEnvironment } from '@app/config/env/SnsEnvironment';
 import { S3Environment } from '@app/config/env/S3Environment';
 import { ChatGPTEnvironment } from '@app/config/env/ChatGPTEnvironment';
 import { CryptoEnvironment } from '@app/config/env/CryptoEnvironment';
+import { KakaoEnvironment } from '@app/config/env/KakaoEnvironment';
 
 export class Environment {
   @ValidateNested()
@@ -31,4 +32,9 @@ export class Environment {
   @IsNotEmpty()
   @Type(() => CryptoEnvironment)
   crypto: CryptoEnvironment;
+
+  @ValidateNested()
+  @IsNotEmpty()
+  @Type(() => KakaoEnvironment)
+  kakao: KakaoEnvironment;
 }
