@@ -143,6 +143,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/notification-manager/tsconfig.lib.json"
       }
+    },
+    "json-db": {
+      "type": "library",
+      "root": "libs/json-db",
+      "entryFile": "index",
+      "sourceRoot": "libs/json-db/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/json-db/tsconfig.lib.json"
+      }
     }
   }
 }

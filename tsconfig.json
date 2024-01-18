@@ -107,6 +107,12 @@
       ],
       "@app/notification-manager/*": [
         "libs/notification-manager/src/*"
+      ],
+      "@app/json-db": [
+        "libs/json-db/src"
+      ],
+      "@app/json-db/*": [
+        "libs/json-db/src/*"
       ]
     }
   }

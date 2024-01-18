@@ -48,6 +48,7 @@
     "js-yaml": "^4.1.0",
     "mustache": "^4.2.0",
     "node-fetch": "2",
+    "node-json-db": "^2.3.0",
     "openai": "^4.12.1",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.7.107",
@@ -130,7 +131,8 @@
       "^@app/template(|/.*)$": "<rootDir>/libs/template/src/$1",
       "^@app/chat-gpt(|/.*)$": "<rootDir>/libs/chat-gpt/src/$1",
       "^@app/crypto(|/.*)$": "<rootDir>/libs/crypto/src/$1",
-      "^@app/notification-manager(|/.*)$": "<rootDir>/libs/notification-manager/src/$1"
+      "^@app/notification-manager(|/.*)$": "<rootDir>/libs/notification-manager/src/$1",
+      "^@app/json-db(|/.*)$": "<rootDir>/libs/json-db/src/$1"
     }
   },
   "lint-staged": {
