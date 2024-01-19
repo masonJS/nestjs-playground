@@ -65,11 +65,7 @@ module.exports = {
       'error',
       {
         groups: ['builtin', 'external', ['parent', 'sibling'], 'index'],
-        alphabetize: {
-          order: 'asc',
-          caseInsensitive: true,
-        },
-        'newlines-between': 'always',
+        'newlines-between': 'never',
       },
     ],
     'import/newline-after-import': ['error', { count: 1 }],

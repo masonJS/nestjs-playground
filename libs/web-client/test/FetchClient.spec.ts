@@ -1,8 +1,8 @@
-import { FetchClient } from '@app/web-client/FetchClient';
 import { Server } from 'http';
 import { AddressInfo } from 'net';
-import FakeHttpServer from './fixture/FakeHttpServer';
+import { FetchClient } from '@app/web-client/FetchClient';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
+import FakeHttpServer from './fixture/FakeHttpServer';
 
 describe('FetchClient', () => {
   let server: Server;

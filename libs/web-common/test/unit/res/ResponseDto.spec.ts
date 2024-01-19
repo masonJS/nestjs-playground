@@ -1,7 +1,7 @@
-import { ResponseDto } from '../../../src/decorator/ResponseDto';
 import { Expose, instanceToPlain } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { DECORATORS } from '@nestjs/swagger/dist/constants';
+import { ResponseDto } from '../../../src/decorator/ResponseDto';
 
 describe('ResponseDto decorator', () => {
   it('get 메소드에 @Expose 데코레이터를 선언다.', () => {

@@ -1,9 +1,9 @@
+import { Readable } from 'stream';
 import { FileStorageService } from '@app/file-storage/FileStorageService';
 import { getFileStorageModule } from '@app/file-storage/getFileStorageModule';
 import { Test } from '@nestjs/testing';
 import { LoggerModule } from '@app/logger/LoggerModule';
 import { S3UploadFileRequest } from '@app/file-storage/dto/S3UploadFileRequest';
-import { Readable } from 'stream';
 
 describe('FileStorageService', () => {
   let fileStorageService: FileStorageService;

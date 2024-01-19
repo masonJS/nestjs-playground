@@ -1,5 +1,5 @@
-import { ResponseDto } from '../../decorator/ResponseDto';
 import { ApiProperty } from '@nestjs/swagger';
+import { ResponseDto } from '../../decorator/ResponseDto';
 
 @ResponseDto()
 export class Page<T> {

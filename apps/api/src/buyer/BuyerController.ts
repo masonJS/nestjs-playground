@@ -6,11 +6,11 @@ import {
   Post,
   Version,
 } from '@nestjs/common';
+import { EventEmitterService } from '@app/event-emitter/EventEmitterService';
+import { ApiOperation } from '@nestjs/swagger';
 import { BuyerCreateRequest } from './dto/BuyerCreateRequest';
 import { BuyerService } from './BuyerService';
-import { EventEmitterService } from '@app/event-emitter/EventEmitterService';
 import { BuyerFindOneEvent } from './event/BuyerFindOneEvent';
-import { ApiOperation } from '@nestjs/swagger';
 
 @Controller('buyer')
 export class BuyerController implements OnApplicationShutdown {
@@ -36,6 +36,7 @@ export class BuyerController implements OnApplicationShutdown {
   @ApiOperation({ summary: '' })
   async findOne() {
     this.eventEmitterService.raise(new BuyerFindOneEvent('event test'));
+
     return 'success';
   }
 

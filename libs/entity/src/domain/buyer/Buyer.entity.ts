@@ -44,6 +44,7 @@ export class Buyer extends BaseEntity {
     buyer.name = name;
     buyer.phone = Phone.create(countryNumber, phoneNumber);
     buyer.receiveAlarmType = receiveAlarmType;
+
     return buyer;
   }
 }

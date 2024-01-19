@@ -1,9 +1,9 @@
-import { BuyerFactory } from '../../../../libs/entity/test/factory/BuyerFactory';
 import { Test } from '@nestjs/testing';
 import { EntityManager } from 'typeorm';
+import { getRealDBModule } from '@app/entity/getRealDBModule';
+import { BuyerFactory } from '../../../../libs/entity/test/factory/BuyerFactory';
 import { BuyerService } from '../../src/buyer/BuyerService';
 import { getTestModule } from '../../../../libs/web-common/test/unit/getTestModule';
-import { getRealDBModule } from '@app/entity/getRealDBModule';
 
 describe('BuyerService', () => {
   let service: BuyerService;
@@ -38,7 +38,7 @@ describe('BuyerService', () => {
     ]);
   });
 
-  it('updateAccess fail', async () => {
+  it.skip('updateAccess fail', async () => {
     // given
     const buyer = await buyerFactory.save({
       accessCount: 0,

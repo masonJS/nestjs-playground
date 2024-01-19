@@ -1,11 +1,22 @@
-import { GetObjectCommandOutput } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
+import { GetObjectCommandOutput } from '@aws-sdk/client-s3';
 
 export class S3DownloadFileResponse {
   private readonly _output: GetObjectCommandOutput;
 
   constructor(output: GetObjectCommandOutput) {
     this._output = output;
+  }
+
+  async fileBuffer(): Promise<Buffer> {
+    const fileStream = this._output.Body as Readable;
+
+    return await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      fileStream.on('data', (chunk) => chunks.push(chunk));
+      fileStream.once('end', () => resolve(Buffer.concat(chunks)));
+      fileStream.once('error', reject);
+    });
   }
 
   get isNotOK(): boolean {
@@ -24,17 +35,6 @@ export class S3DownloadFileResponse {
     return JSON.stringify({
       statusCode: this._output.$metadata.httpStatusCode,
       requestId: this._output.$metadata.requestId,
-    });
-  }
-
-  async fileBuffer(): Promise<Buffer> {
-    const fileStream = this._output.Body as Readable;
-
-    return await new Promise<Buffer>((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      fileStream.on('data', (chunk) => chunks.push(chunk));
-      fileStream.once('end', () => resolve(Buffer.concat(chunks)));
-      fileStream.once('error', reject);
     });
   }
 }

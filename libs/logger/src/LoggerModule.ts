@@ -54,6 +54,7 @@ export class LoggerModule implements OnModuleInit {
 
   private wrap(instance: any, method: string) {
     const methodProtoType = instance[method];
+
     const wrapper = async (...args: any[]) => {
       try {
         return await methodProtoType.apply(instance, args);

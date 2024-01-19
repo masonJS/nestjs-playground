@@ -141,7 +141,6 @@
   },
   "lint-staged": {
     "*.ts": [
-      "yarn swagger-generate",
       "eslint --fix"
     ]
   }

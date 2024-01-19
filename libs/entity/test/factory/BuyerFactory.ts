@@ -1,6 +1,6 @@
-import { BaseFactory } from './BaseFactory';
 import { DeepPartial } from 'typeorm';
 import { Buyer } from '@app/entity/domain/buyer/Buyer.entity';
+import { BaseFactory } from './BaseFactory';
 
 export class BuyerFactory extends BaseFactory<Buyer> {
   override entity = Buyer;

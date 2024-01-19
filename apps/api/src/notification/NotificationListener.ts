@@ -1,9 +1,9 @@
 import { Injectable, UseInterceptors } from '@nestjs/common';
-import { BuyerFindOneEvent } from '../buyer/event/BuyerFindOneEvent';
 import { OnEventLogging } from '@app/event-emitter/decorator/OnEventLogging';
 import { Logger } from '@app/logger/Logger';
-import { LoggingInterceptor } from '../../../../libs/web-common/src/interceptor/LoggingInterceptor';
 import { OnEvent } from '@nestjs/event-emitter';
+import { LoggingInterceptor } from '../../../../libs/web-common/src/interceptor/LoggingInterceptor';
+import { BuyerFindOneEvent } from '../buyer/event/BuyerFindOneEvent';
 
 @Injectable()
 export class NotificationListener {

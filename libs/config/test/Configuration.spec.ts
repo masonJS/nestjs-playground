@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
-import { Configuration } from '../src/Configuration';
 import { ConfigService } from '@nestjs/config';
+import { Configuration } from '../src/Configuration';
 import { Environment } from '../src/env/Environment';
 
 describe('Configuration', () => {

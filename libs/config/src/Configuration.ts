@@ -1,6 +1,6 @@
-import * as yaml from 'js-yaml';
 import { readFileSync } from 'fs';
 import * as process from 'process';
+import * as yaml from 'js-yaml';
 import { plainToClass } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { ConfigModule } from '@nestjs/config';
@@ -31,6 +31,7 @@ export class Configuration {
 
   private static validate(environment: Environment) {
     const errors = validateSync(environment);
+
     if (errors.length > 0) {
       throw new Error(errors.toString());
     }

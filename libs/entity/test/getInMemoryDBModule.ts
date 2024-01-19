@@ -1,3 +1,4 @@
+import { join } from 'path';
 import { IBackup, IMemoryDb, newDb } from 'pg-mem';
 import { DataSource } from 'typeorm';
 import { Test, TestingModuleBuilder } from '@nestjs/testing';
@@ -5,7 +6,6 @@ import { ModuleMetadata } from '@nestjs/common';
 import { EntityModule } from '@app/entity/EntityModule';
 import { SnakeNamingStrategy } from '@app/entity/config/SnakeNamingStrategy';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { join } from 'path';
 
 export class InMemoryDBModule {
   static db: IMemoryDb;

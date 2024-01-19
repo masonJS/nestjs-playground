@@ -1,6 +1,6 @@
-import { RequestDto } from '../../decorator/RequestDto';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { RequestDto } from '../../decorator/RequestDto';
 import { IsPositiveInt } from '../../decorator/validate/IsPositiveInt';
 
 @RequestDto()

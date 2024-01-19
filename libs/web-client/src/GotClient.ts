@@ -39,11 +39,13 @@ export class GotClient implements WebClient {
 
   url(url: string): this {
     this.#options.url = url;
+
     return this;
   }
 
   header(param: Record<string, string | string[]>): this {
     this.#options.headers = param;
+
     return this;
   }
 
@@ -52,6 +54,7 @@ export class GotClient implements WebClient {
       ...this.#options.headers,
       'Content-Type': mediaType,
     };
+
     return this;
   }
 
@@ -97,6 +100,7 @@ export class GotClient implements WebClient {
 
   private setMethod(method: Method): this {
     this.#options.method = method;
+
     return this;
   }
 }

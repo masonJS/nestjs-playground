@@ -1,11 +1,11 @@
-import { StubWebClient } from '../../../web-client/test/StubWebClient';
 import { SlackSenderService } from '@app/notification-manager/slack/SlackSenderService';
 import { Test } from '@nestjs/testing';
 import { WebClientService } from '@app/web-client/creator/WebClientService';
 import { LoggerModule } from '@app/logger/LoggerModule';
 import { HttpStatus } from '@nestjs/common';
-import { TestWebClientService } from '../../../web-client/test/creator/TestWebClientService';
 import { SlackSenderDto } from '@app/notification-manager/slack/dto/SlackSenderDto';
+import { TestWebClientService } from '../../../web-client/test/creator/TestWebClientService';
+import { StubWebClient } from '../../../web-client/test/StubWebClient';
 
 describe('SlackSenderService', () => {
   let slackSenderService: SlackSenderService;

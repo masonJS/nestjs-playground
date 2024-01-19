@@ -4,6 +4,7 @@ export class UrlBuilder {
 
   constructor(url?: string) {
     this.#queryList = new URLSearchParams();
+
     if (url) {
       this.url(url);
     }

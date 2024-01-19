@@ -1,11 +1,11 @@
-import { BuyerFactory } from '../../../../libs/entity/test/factory/BuyerFactory';
 import { Test } from '@nestjs/testing';
 import { EntityManager } from 'typeorm';
-import { BuyerRepository } from '../../src/buyer/BuyerRepository';
 import { ReceiveAlarmType } from '@app/entity/domain/buyer/type/ReceiveAlarmType';
 import { Buyer } from '@app/entity/domain/buyer/Buyer.entity';
-import { getTestModule } from '../../../../libs/web-common/test/unit/getTestModule';
 import { getRealDBModule } from '@app/entity/getRealDBModule';
+import { getTestModule } from '../../../../libs/web-common/test/unit/getTestModule';
+import { BuyerRepository } from '../../src/buyer/BuyerRepository';
+import { BuyerFactory } from '../../../../libs/entity/test/factory/BuyerFactory';
 
 describe('BuyerRepository', () => {
   let buyerRepository: BuyerRepository;

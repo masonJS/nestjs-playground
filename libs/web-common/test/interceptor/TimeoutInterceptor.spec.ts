@@ -1,9 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { TimeoutInterceptor } from '../../src/interceptor/TimeoutInterceptor';
 import { delay, of } from 'rxjs';
 import { RequestTimeoutException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { mock, mockReset } from 'jest-mock-extended';
+import { TimeoutInterceptor } from '../../src/interceptor/TimeoutInterceptor';
 
 describe('TimeoutInterceptor', () => {
   let timeoutInterceptor: TimeoutInterceptor;

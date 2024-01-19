@@ -95,6 +95,7 @@ export class StubWebClient implements WebClient {
 
   timeout(timeout: number): this {
     this.requestTimeout = timeout;
+
     return this;
   }
 

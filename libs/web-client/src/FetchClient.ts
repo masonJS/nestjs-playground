@@ -51,11 +51,13 @@ export class FetchClient implements WebClient {
 
   url(url: string): this {
     this.#url = url;
+
     return this;
   }
 
   header(param: Record<string, string>): this {
     this.#options.headers = param;
+
     return this;
   }
 
@@ -87,6 +89,7 @@ export class FetchClient implements WebClient {
 
   timeout(timeout: number): this {
     this.#timeout = timeout;
+
     return this;
   }
 
@@ -109,6 +112,7 @@ export class FetchClient implements WebClient {
 
   private setMethod(method: Method): this {
     this.#options.method = method;
+
     return this;
   }
 }
