@@ -28,5 +28,52 @@ module.exports = {
     '@typescript-eslint/no-misused-promises': 'error',
     '@typescript-eslint/promise-function-async': 'error',
     'no-console': 'error',
+    '@typescript-eslint/member-ordering': [
+      'error',
+      {
+        default: {
+          memberTypes: [
+            'public-static-field',
+            'protected-static-field',
+            'private-static-field',
+            'public-instance-field',
+            'protected-instance-field',
+            'private-instance-field',
+            'constructor',
+            'public-static-method',
+            'protected-static-method',
+            'private-static-method',
+            'public-instance-method',
+            'protected-instance-method',
+            'private-instance-method',
+            'get',
+          ],
+        },
+      },
+    ],
+    curly: 1,
+    'arrow-body-style': ['error', 'as-needed'],
+    eqeqeq: ['error', 'always'],
+    'no-else-return': ['error', { allowElseIf: false }],
+    'padding-line-between-statements': [
+      'error',
+      { blankLine: 'always', prev: '*', next: 'return' },
+      { blankLine: 'always', prev: '*', next: 'block' },
+      { blankLine: 'always', prev: '*', next: 'block-like' },
+    ],
+    'import/order': [
+      'error',
+      {
+        groups: ['builtin', 'external', ['parent', 'sibling'], 'index'],
+        alphabetize: {
+          order: 'asc',
+          caseInsensitive: true,
+        },
+        'newlines-between': 'always',
+      },
+    ],
+    'import/newline-after-import': ['error', { count: 1 }],
+    'max-nested-callbacks': ['error', 5],
+    'no-return-await': 'off',
   },
 };
