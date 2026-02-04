@@ -6,6 +6,7 @@ import { ChatGPTEnvironment } from '@app/config/env/ChatGPTEnvironment';
 import { CryptoEnvironment } from '@app/config/env/CryptoEnvironment';
 import { KakaoEnvironment } from '@app/config/env/KakaoEnvironment';
 import { DatabaseEnvironment } from './DatabaseEnvironment';
+import { RedisEnvironment } from './RedisEnvironment';
 
 export class Environment {
   @ValidateNested()
@@ -37,4 +38,9 @@ export class Environment {
   @IsNotEmpty()
   @Type(() => KakaoEnvironment)
   kakao: KakaoEnvironment;
+
+  @ValidateNested()
+  @IsNotEmpty()
+  @Type(() => RedisEnvironment)
+  redis: RedisEnvironment;
 }
