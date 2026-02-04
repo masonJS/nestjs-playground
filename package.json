@@ -45,6 +45,7 @@
     "class-validator": "^0.14.0",
     "cls-rtracer": "^2.6.3",
     "got": "^11.8.2",
+    "ioredis": "^5.9.2",
     "js-yaml": "^4.1.0",
     "mustache": "^4.2.0",
     "node-fetch": "2",
