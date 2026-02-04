@@ -152,6 +152,21 @@
       "compilerOptions": {
         "tsConfigPath": "libs/json-db/tsconfig.lib.json"
       }
+    },
+    "bulk-action": {
+      "type": "library",
+      "root": "libs/bulk-action",
+      "entryFile": "index",
+      "sourceRoot": "libs/bulk-action/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/bulk-action/tsconfig.lib.json",
+        "assets": [
+          {
+            "include": "**/*.lua",
+            "watchAssets": true
+          }
+        ]
+      }
     }
   }
 }

@@ -113,6 +113,12 @@
       ],
       "@app/json-db/*": [
         "libs/json-db/src/*"
+      ],
+      "@app/bulk-action": [
+        "libs/bulk-action/src"
+      ],
+      "@app/bulk-action/*": [
+        "libs/bulk-action/src/*"
       ]
     }
   }
