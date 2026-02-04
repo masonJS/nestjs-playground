@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:latest
@@ -11,6 +9,12 @@ services:
       POSTGRES_INITDB_ARGS: --encoding=UTF-8
     ports:
       - "5434:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: play_ground_redis
+    ports:
+      - "6379:6379"
 
   localstack:
     image: localstack/localstack:0.14.1
