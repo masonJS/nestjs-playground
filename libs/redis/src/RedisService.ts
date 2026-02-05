@@ -49,31 +49,39 @@ export class RedisService implements OnModuleDestroy {
     return (command as Function).call(this.client, ...keys, ...args);
   }
 
-  async llen(key: string): Promise<number> {
+  async getListLength(key: string): Promise<number> {
     return this.client.llen(key);
   }
 
-  async zcard(key: string): Promise<number> {
-    return this.client.zcard(key);
-  }
-
-  async hgetall(key: string): Promise<Record<string, string>> {
-    return this.client.hgetall(key);
-  }
-
-  async hget(key: string, field: string): Promise<string | null> {
-    return this.client.hget(key, field);
-  }
-
-  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+  async getListRange(
+    key: string,
+    start: number,
+    stop: number,
+  ): Promise<string[]> {
     return this.client.lrange(key, start, stop);
   }
 
-  async zrange(key: string, start: number, stop: number): Promise<string[]> {
+  async getSortedSetCount(key: string): Promise<number> {
+    return this.client.zcard(key);
+  }
+
+  async getSortedSetRange(
+    key: string,
+    start: number,
+    stop: number,
+  ): Promise<string[]> {
     return this.client.zrange(key, start, stop);
   }
 
-  async flushdb(): Promise<string> {
+  async getHashAll(key: string): Promise<Record<string, string>> {
+    return this.client.hgetall(key);
+  }
+
+  async getHash(key: string, field: string): Promise<string | null> {
+    return this.client.hget(key, field);
+  }
+
+  async flushDatabase(): Promise<string> {
     return this.client.flushdb();
   }
 }

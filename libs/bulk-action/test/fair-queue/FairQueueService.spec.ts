@@ -60,11 +60,11 @@ describe('FairQueueService', () => {
   });
 
   beforeEach(async () => {
-    await redisService.flushdb();
+    await redisService.flushDatabase();
   });
 
   afterAll(async () => {
-    await redisService.flushdb();
+    await redisService.flushDatabase();
     await module.close();
   });
 
@@ -84,7 +84,9 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const jobData = await redisService.hgetall(`${KEY_PREFIX}job:${jobId}`);
+      const jobData = await redisService.getHashAll(
+        `${KEY_PREFIX}job:${jobId}`,
+      );
       expect(jobData.id).toBe(jobId);
       expect(jobData.groupId).toBe(groupId);
       expect(jobData.type).toBe('SEND_PROMOTION');
@@ -109,7 +111,7 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const jobs = await redisService.lrange(
+      const jobs = await redisService.getListRange(
         `${KEY_PREFIX}group:group-1:jobs`,
         0,
         -1,
@@ -129,7 +131,7 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const meta = (await redisService.hgetall(
+      const meta = (await redisService.getHashAll(
         `${KEY_PREFIX}group:group-1:meta`,
       )) as unknown as JobGroupHash;
       expect(meta.totalJobs).toBe('1');
@@ -155,7 +157,7 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const totalJobs = await redisService.hget(
+      const totalJobs = await redisService.getHash(
         `${KEY_PREFIX}group:group-1:meta`,
         'totalJobs',
       );
@@ -173,7 +175,7 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const members = await redisService.zrange(
+      const members = await redisService.getSortedSetRange(
         `${KEY_PREFIX}fair-queue:high`,
         0,
         -1,
@@ -292,7 +294,7 @@ describe('FairQueueService', () => {
       expect(firstAck).toBe(false);
       expect(secondAck).toBe(true);
 
-      const meta = (await redisService.hgetall(
+      const meta = (await redisService.getHashAll(
         `${KEY_PREFIX}group:group-1:meta`,
       )) as unknown as JobGroupHash;
       expect(meta.status).toBe('AGGREGATING');

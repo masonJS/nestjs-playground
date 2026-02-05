@@ -106,14 +106,16 @@ export class FairQueueService {
   }
 
   async getGroupPendingCount(groupId: string): Promise<number> {
-    return this.redisService.llen(this.getGroupJobsKey(groupId));
+    return this.redisService.getListLength(this.getGroupJobsKey(groupId));
   }
 
   async getQueueStats(): Promise<QueueStats> {
     const [highCount, normalCount, lowCount] = await Promise.all([
-      this.redisService.zcard(this.getQueueKey(PriorityLevel.HIGH)),
-      this.redisService.zcard(this.getQueueKey(PriorityLevel.NORMAL)),
-      this.redisService.zcard(this.getQueueKey(PriorityLevel.LOW)),
+      this.redisService.getSortedSetCount(this.getQueueKey(PriorityLevel.HIGH)),
+      this.redisService.getSortedSetCount(
+        this.getQueueKey(PriorityLevel.NORMAL),
+      ),
+      this.redisService.getSortedSetCount(this.getQueueKey(PriorityLevel.LOW)),
     ]);
 
     return {
