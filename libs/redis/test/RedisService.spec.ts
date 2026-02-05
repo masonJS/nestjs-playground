@@ -45,7 +45,7 @@ describe('RedisService', () => {
       );
 
       // when
-      const result = await service.getHashAll('test:hash');
+      const result = await service.hash.getAll('test:hash');
 
       // then
       expect(result.name).toBe('minwoo');
@@ -61,7 +61,7 @@ describe('RedisService', () => {
       );
 
       // when
-      const result = await service.getHash('test:hash', 'name');
+      const result = await service.hash.get('test:hash', 'name');
 
       // then
       expect(result).toBe('minwoo');
@@ -69,7 +69,7 @@ describe('RedisService', () => {
 
     it('존재하지 않는 Hash 필드 조회 시 null을 반환한다', async () => {
       // when
-      const result = await service.getHash('nonexistent', 'field');
+      const result = await service.hash.get('nonexistent', 'field');
 
       // then
       expect(result).toBeNull();
@@ -82,7 +82,7 @@ describe('RedisService', () => {
       await service.callCommand('rpush', ['test:list'], ['a', 'b', 'c']);
 
       // when
-      const result = await service.getListLength('test:list');
+      const result = await service.list.length('test:list');
 
       // then
       expect(result).toBe(3);
@@ -93,7 +93,7 @@ describe('RedisService', () => {
       await service.callCommand('rpush', ['test:list'], ['a', 'b', 'c']);
 
       // when
-      const result = await service.getListRange('test:list', 0, -1);
+      const result = await service.list.range('test:list', 0, -1);
 
       // then
       expect(result).toEqual(['a', 'b', 'c']);
@@ -101,7 +101,7 @@ describe('RedisService', () => {
 
     it('존재하지 않는 List의 길이는 0이다', async () => {
       // when
-      const result = await service.getListLength('nonexistent');
+      const result = await service.list.length('nonexistent');
 
       // then
       expect(result).toBe(0);
@@ -114,7 +114,7 @@ describe('RedisService', () => {
       await service.callCommand('zadd', ['test:zset'], ['10', 'a', '20', 'b']);
 
       // when
-      const result = await service.getSortedSetCount('test:zset');
+      const result = await service.sortedSet.count('test:zset');
 
       // then
       expect(result).toBe(2);
@@ -129,7 +129,7 @@ describe('RedisService', () => {
       );
 
       // when
-      const result = await service.getSortedSetRange('test:zset', 0, -1);
+      const result = await service.sortedSet.range('test:zset', 0, -1);
 
       // then
       expect(result).toEqual(['a', 'b', 'c']);
@@ -137,7 +137,7 @@ describe('RedisService', () => {
 
     it('존재하지 않는 Sorted Set의 멤버 수는 0이다', async () => {
       // when
-      const result = await service.getSortedSetCount('nonexistent');
+      const result = await service.sortedSet.count('nonexistent');
 
       // then
       expect(result).toBe(0);
@@ -185,7 +185,7 @@ describe('RedisService', () => {
       await service.flushDatabase();
 
       // then
-      const result = await service.getHash('test:key1', 'field');
+      const result = await service.hash.get('test:key1', 'field');
       expect(result).toBeNull();
     });
   });
