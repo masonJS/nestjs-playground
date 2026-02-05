@@ -119,6 +119,12 @@
       ],
       "@app/bulk-action/*": [
         "libs/bulk-action/src/*"
+      ],
+      "@app/redis": [
+        "libs/redis/src"
+      ],
+      "@app/redis/*": [
+        "libs/redis/src/*"
       ]
     }
   }

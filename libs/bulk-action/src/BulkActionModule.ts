@@ -1,18 +1,21 @@
 import { DynamicModule, Module } from '@nestjs/common';
+import { RedisModule } from '@app/redis/RedisModule';
 import { FairQueueService } from './fair-queue/FairQueueService';
 import { LuaScriptLoader } from './lua/LuaScriptLoader';
-import { redisProvider, BULK_ACTION_CONFIG } from './redis/RedisProvider';
 import {
+  BULK_ACTION_CONFIG,
   BulkActionConfig,
+  BulkActionRedisConfig,
   DEFAULT_FAIR_QUEUE_CONFIG,
-  RedisConfig,
   FairQueueConfig,
 } from './config/BulkActionConfig';
 
 @Module({})
 export class BulkActionModule {
   static register(
-    config: { redis: RedisConfig } & { fairQueue?: Partial<FairQueueConfig> },
+    config: { redis: BulkActionRedisConfig } & {
+      fairQueue?: Partial<FairQueueConfig>;
+    },
   ): DynamicModule {
     const mergedConfig: BulkActionConfig = {
       redis: config.redis,
@@ -24,12 +27,19 @@ export class BulkActionModule {
 
     return {
       module: BulkActionModule,
+      imports: [
+        RedisModule.register({
+          host: config.redis.host,
+          port: config.redis.port,
+          password: config.redis.password,
+          db: config.redis.db,
+        }),
+      ],
       providers: [
         {
           provide: BULK_ACTION_CONFIG,
           useValue: mergedConfig,
         },
-        redisProvider,
         LuaScriptLoader,
         FairQueueService,
       ],

@@ -1,39 +1,26 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { Injectable, OnModuleInit, Inject } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT } from '../redis/RedisProvider';
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
 
 @Injectable()
 export class LuaScriptLoader implements OnModuleInit {
-  private readonly scripts: Map<string, string> = new Map();
-
-  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+  constructor(private readonly redisService: RedisService) {}
 
   async onModuleInit(): Promise<void> {
-    await this.loadScript('enqueue', 'enqueue.lua');
-    await this.loadScript('dequeue', 'dequeue.lua');
-    await this.loadScript('ack', 'ack.lua');
+    await this.loadScript('enqueue', 'enqueue.lua', 4);
+    await this.loadScript('dequeue', 'dequeue.lua', 3);
+    await this.loadScript('ack', 'ack.lua', 2);
   }
 
-  private async loadScript(name: string, filename: string): Promise<void> {
+  private async loadScript(
+    name: string,
+    filename: string,
+    numberOfKeys: number,
+  ): Promise<void> {
     const luaPath = path.join(__dirname, filename);
-    const script = await fs.readFile(luaPath, 'utf-8');
+    const lua = await fs.readFile(luaPath, 'utf-8');
 
-    this.redis.defineCommand(name, {
-      numberOfKeys: this.getKeyCount(name),
-      lua: script,
-    });
-    this.scripts.set(name, script);
-  }
-
-  private getKeyCount(name: string): number {
-    const keyCounts: Record<string, number> = {
-      enqueue: 4,
-      dequeue: 3,
-      ack: 2,
-    };
-
-    return keyCounts[name] ?? 0;
+    this.redisService.defineCommand({ name, numberOfKeys, lua });
   }
 }

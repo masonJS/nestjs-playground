@@ -14,6 +14,8 @@ export enum PriorityLevel {
   LOW = 'low',
 }
 
+export type JobGroupHash = Record<keyof JobGroup, string>;
+
 export enum GroupStatus {
   CREATED = 'CREATED',
   DISPATCHED = 'DISPATCHED',

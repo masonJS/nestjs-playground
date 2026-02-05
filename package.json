@@ -138,7 +138,8 @@
       "^@app/crypto(|/.*)$": "<rootDir>/libs/crypto/src/$1",
       "^@app/notification-manager(|/.*)$": "<rootDir>/libs/notification-manager/src/$1",
       "^@app/json-db(|/.*)$": "<rootDir>/libs/json-db/src/$1",
-      "^@app/bulk-action(|/.*)$": "<rootDir>/libs/bulk-action/src/$1"
+      "^@app/bulk-action(|/.*)$": "<rootDir>/libs/bulk-action/src/$1",
+      "^@app/redis(|/.*)$": "<rootDir>/libs/redis/src/$1"
     }
   },
   "lint-staged": {

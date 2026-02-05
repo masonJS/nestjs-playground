@@ -1,8 +1,8 @@
-export interface RedisConfig {
-  host: string;
-  port: number;
-  password?: string;
-  db?: number;
+import { RedisConfig } from '@app/redis/RedisConfig';
+
+export const BULK_ACTION_CONFIG = Symbol('BULK_ACTION_CONFIG');
+
+export interface BulkActionRedisConfig extends RedisConfig {
   keyPrefix?: string;
 }
 
@@ -11,7 +11,7 @@ export interface FairQueueConfig {
 }
 
 export interface BulkActionConfig {
-  redis: RedisConfig;
+  redis: BulkActionRedisConfig;
   fairQueue: FairQueueConfig;
 }
 

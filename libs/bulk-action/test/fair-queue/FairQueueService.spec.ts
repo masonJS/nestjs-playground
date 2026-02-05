@@ -1,21 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import Redis from 'ioredis';
 import { Configuration } from '@app/config/Configuration';
+import { RedisModule } from '@app/redis/RedisModule';
+import { RedisService } from '@app/redis/RedisService';
 import { FairQueueService } from '@app/bulk-action/fair-queue/FairQueueService';
 import { LuaScriptLoader } from '@app/bulk-action/lua/LuaScriptLoader';
 import {
-  REDIS_CLIENT,
   BULK_ACTION_CONFIG,
-} from '@app/bulk-action/redis/RedisProvider';
-import { BulkActionConfig } from '@app/bulk-action/config/BulkActionConfig';
+  BulkActionConfig,
+} from '@app/bulk-action/config/BulkActionConfig';
 import { JobStatus } from '@app/bulk-action/model/Job';
-import { PriorityLevel } from '@app/bulk-action/model/JobGroup';
+import { PriorityLevel, JobGroupHash } from '@app/bulk-action/model/JobGroup';
 import { expectNonNullable } from '../../../web-common/test/unit/expectNonNullable';
 
 describe('FairQueueService', () => {
   let module: TestingModule;
   let service: FairQueueService;
-  let redis: Redis;
+  let redisService: RedisService;
 
   const KEY_PREFIX = 'test:';
   const env = Configuration.getEnv();
@@ -35,17 +35,15 @@ describe('FairQueueService', () => {
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
+      imports: [
+        RedisModule.register({
+          host: config.redis.host,
+          port: config.redis.port,
+          password: config.redis.password,
+          db: config.redis.db,
+        }),
+      ],
       providers: [
-        {
-          provide: REDIS_CLIENT,
-          useFactory: () =>
-            new Redis({
-              host: config.redis.host,
-              port: config.redis.port,
-              password: config.redis.password,
-              db: config.redis.db,
-            }),
-        },
         {
           provide: BULK_ACTION_CONFIG,
           useValue: config,
@@ -58,15 +56,15 @@ describe('FairQueueService', () => {
     await module.init();
 
     service = module.get(FairQueueService);
-    redis = module.get(REDIS_CLIENT);
+    redisService = module.get(RedisService);
   });
 
   beforeEach(async () => {
-    await redis.flushdb();
+    await redisService.flushdb();
   });
 
   afterAll(async () => {
-    await redis.flushdb();
+    await redisService.flushdb();
     await module.close();
   });
 
@@ -86,7 +84,7 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const jobData = await redis.hgetall(`${KEY_PREFIX}job:${jobId}`);
+      const jobData = await redisService.hgetall(`${KEY_PREFIX}job:${jobId}`);
       expect(jobData.id).toBe(jobId);
       expect(jobData.groupId).toBe(groupId);
       expect(jobData.type).toBe('SEND_PROMOTION');
@@ -111,7 +109,11 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const jobs = await redis.lrange(`${KEY_PREFIX}group:group-1:jobs`, 0, -1);
+      const jobs = await redisService.lrange(
+        `${KEY_PREFIX}group:group-1:jobs`,
+        0,
+        -1,
+      );
       expect(jobs).toEqual(['job-1', 'job-2']);
     });
 
@@ -127,7 +129,9 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const meta = await redis.hgetall(`${KEY_PREFIX}group:group-1:meta`);
+      const meta = (await redisService.hgetall(
+        `${KEY_PREFIX}group:group-1:meta`,
+      )) as unknown as JobGroupHash;
       expect(meta.totalJobs).toBe('1');
       expect(meta.doneJobs).toBe('0');
       expect(meta.basePriority).toBe('100');
@@ -151,7 +155,7 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const totalJobs = await redis.hget(
+      const totalJobs = await redisService.hget(
         `${KEY_PREFIX}group:group-1:meta`,
         'totalJobs',
       );
@@ -169,7 +173,7 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const members = await redis.zrange(
+      const members = await redisService.zrange(
         `${KEY_PREFIX}fair-queue:high`,
         0,
         -1,
@@ -288,7 +292,9 @@ describe('FairQueueService', () => {
       expect(firstAck).toBe(false);
       expect(secondAck).toBe(true);
 
-      const meta = await redis.hgetall(`${KEY_PREFIX}group:group-1:meta`);
+      const meta = (await redisService.hgetall(
+        `${KEY_PREFIX}group:group-1:meta`,
+      )) as unknown as JobGroupHash;
       expect(meta.status).toBe('AGGREGATING');
       expect(meta.doneJobs).toBe('2');
     });
