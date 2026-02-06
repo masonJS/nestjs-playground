@@ -1,20 +1,29 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import { RedisModule } from '@app/redis/RedisModule';
-import { FairQueueService } from './fair-queue/FairQueueService';
-import { LuaScriptLoader } from './lua/LuaScriptLoader';
+import { BackpressureService } from './backpressure/BackpressureService';
+import { DispatcherService } from './backpressure/DispatcherService';
+import { NonReadyQueueService } from './backpressure/NonReadyQueueService';
+import { RateLimiterService } from './backpressure/RateLimiterService';
+import { ReadyQueueService } from './backpressure/ReadyQueueService';
 import {
+  BackpressureConfig,
   BULK_ACTION_CONFIG,
   BulkActionConfig,
   BulkActionRedisConfig,
+  DEFAULT_BACKPRESSURE_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
   FairQueueConfig,
 } from './config/BulkActionConfig';
+import { FairQueueService } from './fair-queue/FairQueueService';
+import { RedisKeyBuilder } from './key/RedisKeyBuilder';
+import { LuaScriptLoader } from './lua/LuaScriptLoader';
 
 @Module({})
 export class BulkActionModule {
   static register(
     config: { redis: BulkActionRedisConfig } & {
       fairQueue?: Partial<FairQueueConfig>;
+      backpressure?: Partial<BackpressureConfig>;
     },
   ): DynamicModule {
     const mergedConfig: BulkActionConfig = {
@@ -22,6 +31,10 @@ export class BulkActionModule {
       fairQueue: {
         ...DEFAULT_FAIR_QUEUE_CONFIG,
         ...config.fairQueue,
+      },
+      backpressure: {
+        ...DEFAULT_BACKPRESSURE_CONFIG,
+        ...config.backpressure,
       },
     };
 
@@ -40,10 +53,16 @@ export class BulkActionModule {
           provide: BULK_ACTION_CONFIG,
           useValue: mergedConfig,
         },
+        RedisKeyBuilder,
         LuaScriptLoader,
         FairQueueService,
+        RateLimiterService,
+        ReadyQueueService,
+        NonReadyQueueService,
+        DispatcherService,
+        BackpressureService,
       ],
-      exports: [FairQueueService],
+      exports: [FairQueueService, BackpressureService, ReadyQueueService],
     };
   }
 }
