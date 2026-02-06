@@ -4,6 +4,7 @@ import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
 } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
 import { EnqueueOptions } from '../model/EnqueueOptions';
 import { Job, JobStatus } from '../model/Job';
 import { PriorityLevel } from '../model/JobGroup';
@@ -18,14 +19,12 @@ export interface QueueStats {
 @Injectable()
 export class FairQueueService {
   private readonly logger = new Logger(FairQueueService.name);
-  private readonly keyPrefix: string;
 
   constructor(
     private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
-  ) {
-    this.keyPrefix = config.redis.keyPrefix ?? 'bulk-action:';
-  }
+    private readonly keys: RedisKeyBuilder,
+  ) {}
 
   async enqueue(options: EnqueueOptions): Promise<void> {
     const {
@@ -38,10 +37,10 @@ export class FairQueueService {
     } = options;
 
     const keys = [
-      this.getQueueKey(priorityLevel),
-      this.getGroupJobsKey(groupId),
-      this.getGroupMetaKey(groupId),
-      this.getJobKey(jobId),
+      this.keys.fairQueue(priorityLevel),
+      this.keys.groupJobs(groupId),
+      this.keys.groupMeta(groupId),
+      this.keys.job(jobId),
     ];
 
     const args = [
@@ -71,12 +70,15 @@ export class FairQueueService {
 
   async dequeue(): Promise<Job | null> {
     const keys = [
-      this.getQueueKey(PriorityLevel.HIGH),
-      this.getQueueKey(PriorityLevel.NORMAL),
-      this.getQueueKey(PriorityLevel.LOW),
+      this.keys.fairQueue(PriorityLevel.HIGH),
+      this.keys.fairQueue(PriorityLevel.NORMAL),
+      this.keys.fairQueue(PriorityLevel.LOW),
     ];
 
-    const args = [this.config.fairQueue.alpha.toString(), this.keyPrefix];
+    const args = [
+      this.config.fairQueue.alpha.toString(),
+      this.keys.getPrefix(),
+    ];
 
     try {
       const result = await this.redisService.callCommand('dequeue', keys, args);
@@ -93,7 +95,7 @@ export class FairQueueService {
   }
 
   async ack(jobId: string, groupId: string): Promise<boolean> {
-    const keys = [this.getJobKey(jobId), this.getGroupMetaKey(groupId)];
+    const keys = [this.keys.job(jobId), this.keys.groupMeta(groupId)];
 
     const result = await this.redisService.callCommand('ack', keys, []);
     const isGroupCompleted = result === 1;
@@ -106,16 +108,18 @@ export class FairQueueService {
   }
 
   async getGroupPendingCount(groupId: string): Promise<number> {
-    return this.redisService.getListLength(this.getGroupJobsKey(groupId));
+    return this.redisService.list.length(this.keys.groupJobs(groupId));
   }
 
   async getQueueStats(): Promise<QueueStats> {
     const [highCount, normalCount, lowCount] = await Promise.all([
-      this.redisService.getSortedSetCount(this.getQueueKey(PriorityLevel.HIGH)),
-      this.redisService.getSortedSetCount(
-        this.getQueueKey(PriorityLevel.NORMAL),
+      this.redisService.sortedSet.count(
+        this.keys.fairQueue(PriorityLevel.HIGH),
       ),
-      this.redisService.getSortedSetCount(this.getQueueKey(PriorityLevel.LOW)),
+      this.redisService.sortedSet.count(
+        this.keys.fairQueue(PriorityLevel.NORMAL),
+      ),
+      this.redisService.sortedSet.count(this.keys.fairQueue(PriorityLevel.LOW)),
     ]);
 
     return {
@@ -124,22 +128,6 @@ export class FairQueueService {
       lowPriorityGroups: lowCount,
       totalGroups: highCount + normalCount + lowCount,
     };
-  }
-
-  private getQueueKey(level: PriorityLevel): string {
-    return `${this.keyPrefix}fair-queue:${level}`;
-  }
-
-  private getGroupJobsKey(groupId: string): string {
-    return `${this.keyPrefix}group:${groupId}:jobs`;
-  }
-
-  private getGroupMetaKey(groupId: string): string {
-    return `${this.keyPrefix}group:${groupId}:meta`;
-  }
-
-  private getJobKey(jobId: string): string {
-    return `${this.keyPrefix}job:${jobId}`;
   }
 
   private parseJobFromRedis(raw: string[]): Job {

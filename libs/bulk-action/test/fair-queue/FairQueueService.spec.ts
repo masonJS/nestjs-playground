@@ -3,10 +3,12 @@ import { Configuration } from '@app/config/Configuration';
 import { RedisModule } from '@app/redis/RedisModule';
 import { RedisService } from '@app/redis/RedisService';
 import { FairQueueService } from '@app/bulk-action/fair-queue/FairQueueService';
+import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
 import { LuaScriptLoader } from '@app/bulk-action/lua/LuaScriptLoader';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
+  DEFAULT_BACKPRESSURE_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { JobStatus } from '@app/bulk-action/model/Job';
 import { PriorityLevel, JobGroupHash } from '@app/bulk-action/model/JobGroup';
@@ -31,6 +33,7 @@ describe('FairQueueService', () => {
     fairQueue: {
       alpha: 10000,
     },
+    backpressure: DEFAULT_BACKPRESSURE_CONFIG,
   };
 
   beforeAll(async () => {
@@ -48,6 +51,7 @@ describe('FairQueueService', () => {
           provide: BULK_ACTION_CONFIG,
           useValue: config,
         },
+        RedisKeyBuilder,
         LuaScriptLoader,
         FairQueueService,
       ],
@@ -84,19 +88,19 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const jobData = await redisService.getHashAll(
+      const result = await redisService.hash.getAll(
         `${KEY_PREFIX}job:${jobId}`,
       );
-      expect(jobData.id).toBe(jobId);
-      expect(jobData.groupId).toBe(groupId);
-      expect(jobData.type).toBe('SEND_PROMOTION');
-      expect(JSON.parse(jobData.payload)).toEqual(payload);
-      expect(jobData.status).toBe(JobStatus.PENDING);
-      expect(Number(jobData.createdAt)).toBeGreaterThan(0);
+      expect(result.id).toBe(jobId);
+      expect(result.groupId).toBe(groupId);
+      expect(result.type).toBe('SEND_PROMOTION');
+      expect(JSON.parse(result.payload)).toEqual(payload);
+      expect(result.status).toBe(JobStatus.PENDING);
+      expect(Number(result.createdAt)).toBeGreaterThan(0);
     });
 
     it('그룹 작업 목록에 jobId가 추가된다', async () => {
-      // given & when
+      // when
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
@@ -111,16 +115,16 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const jobs = await redisService.getListRange(
+      const result = await redisService.list.range(
         `${KEY_PREFIX}group:group-1:jobs`,
         0,
         -1,
       );
-      expect(jobs).toEqual(['job-1', 'job-2']);
+      expect(result).toEqual(['job-1', 'job-2']);
     });
 
     it('그룹 메타데이터가 생성된다', async () => {
-      // given & when
+      // when
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
@@ -131,18 +135,18 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const meta = (await redisService.getHashAll(
+      const result = (await redisService.hash.getAll(
         `${KEY_PREFIX}group:group-1:meta`,
       )) as unknown as JobGroupHash;
-      expect(meta.totalJobs).toBe('1');
-      expect(meta.doneJobs).toBe('0');
-      expect(meta.basePriority).toBe('100');
-      expect(meta.priorityLevel).toBe('high');
-      expect(meta.status).toBe('CREATED');
+      expect(result.totalJobs).toBe('1');
+      expect(result.doneJobs).toBe('0');
+      expect(result.basePriority).toBe('100');
+      expect(result.priorityLevel).toBe('high');
+      expect(result.status).toBe('CREATED');
     });
 
     it('같은 그룹에 작업 추가 시 totalJobs가 증가한다', async () => {
-      // given & when
+      // when
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
@@ -157,15 +161,15 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const totalJobs = await redisService.getHash(
+      const result = await redisService.hash.get(
         `${KEY_PREFIX}group:group-1:meta`,
         'totalJobs',
       );
-      expect(totalJobs).toBe('2');
+      expect(result).toBe('2');
     });
 
     it('그룹이 해당 priority 큐의 sorted set에 등록된다', async () => {
-      // given & when
+      // when
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
@@ -175,16 +179,16 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const members = await redisService.getSortedSetRange(
+      const result = await redisService.sortedSet.range(
         `${KEY_PREFIX}fair-queue:high`,
         0,
         -1,
       );
-      expect(members).toEqual(['group-1']);
+      expect(result).toEqual(['group-1']);
     });
 
     it('서로 다른 priority 큐에 그룹이 분리된다', async () => {
-      // given & when
+      // when
       await service.enqueue({
         groupId: 'group-high',
         jobId: 'job-1',
@@ -201,10 +205,10 @@ describe('FairQueueService', () => {
       });
 
       // then
-      const stats = await service.getQueueStats();
-      expect(stats.highPriorityGroups).toBe(1);
-      expect(stats.normalPriorityGroups).toBe(0);
-      expect(stats.lowPriorityGroups).toBe(1);
+      const result = await service.getQueueStats();
+      expect(result.highPriorityGroups).toBe(1);
+      expect(result.normalPriorityGroups).toBe(0);
+      expect(result.lowPriorityGroups).toBe(1);
     });
   });
 
@@ -220,15 +224,15 @@ describe('FairQueueService', () => {
       });
 
       // when
-      const job = await service.dequeue();
+      const result = await service.dequeue();
 
       // then
-      expectNonNullable(job);
-      expect(job.id).toBe('job-1');
-      expect(job.groupId).toBe('group-1');
-      expect(job.type).toBe('SEND');
-      expect(JSON.parse(job.payload)).toEqual(payload);
-      expect(job.status).toBe(JobStatus.PROCESSING);
+      expectNonNullable(result);
+      expect(result.id).toBe('job-1');
+      expect(result.groupId).toBe('group-1');
+      expect(result.type).toBe('SEND');
+      expect(JSON.parse(result.payload)).toEqual(payload);
+      expect(result.status).toBe(JobStatus.PROCESSING);
     });
 
     it('HIGH 그룹이 NORMAL보다 먼저 dequeue된다', async () => {
@@ -260,8 +264,110 @@ describe('FairQueueService', () => {
     });
 
     it('큐가 비어있으면 null을 반환한다', async () => {
-      const job = await service.dequeue();
-      expect(job).toBeNull();
+      // when
+      const result = await service.dequeue();
+
+      // then
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('공정 분배', () => {
+    it('ack으로 doneJobs가 증가하면 sjfBoost가 적용되어 그룹이 전환된다', async () => {
+      // given - 두 그룹에 각 3개 작업
+      await enqueueJob('group-A', 'A-1');
+      await enqueueJob('group-A', 'A-2');
+      await enqueueJob('group-A', 'A-3');
+      await enqueueJob('group-B', 'B-1');
+      await enqueueJob('group-B', 'B-2');
+      await enqueueJob('group-B', 'B-3');
+
+      // when - dequeue + ack 반복
+      const first = await service.dequeue();
+      expectNonNullable(first);
+      await service.ack(first.id, first.groupId);
+      const firstGroup = first.groupId;
+
+      const second = await service.dequeue();
+      expectNonNullable(second);
+      await service.ack(second.id, second.groupId);
+
+      const third = await service.dequeue();
+      expectNonNullable(third);
+
+      // then
+      // 첫 두 작업은 같은 그룹에서 나온다 (두 번째 dequeue에서 sjfBoost 재계산)
+      expect(second.groupId).toBe(firstGroup);
+      // 세 번째 작업은 다른 그룹에서 나온다 (sjfBoost 적용으로 그룹 전환)
+      expect(third.groupId).not.toBe(firstGroup);
+    });
+
+    it('dequeue+ack 후 sorted set에서 해당 그룹의 순서가 하락한다', async () => {
+      // given - 두 그룹에 각 3개 작업
+      await enqueueJob('group-A', 'A-1');
+      await enqueueJob('group-A', 'A-2');
+      await enqueueJob('group-A', 'A-3');
+      await enqueueJob('group-B', 'B-1');
+      await enqueueJob('group-B', 'B-2');
+      await enqueueJob('group-B', 'B-3');
+
+      // when - 첫 번째 dequeue + ack
+      const first = await service.dequeue();
+      expectNonNullable(first);
+      const firstGroup = first.groupId;
+      const otherGroup = firstGroup === 'group-A' ? 'group-B' : 'group-A';
+      await service.ack(first.id, first.groupId);
+
+      // 두 번째 dequeue 시 doneJobs=1이 반영되어 sjfBoost 재계산
+      await service.dequeue();
+
+      // then - sjfBoost로 인해 firstGroup이 sorted set에서 뒤로 밀린다
+      const result = await redisService.sortedSet.range(
+        `${KEY_PREFIX}fair-queue:normal`,
+        0,
+        -1,
+      );
+      expect(result[0]).toBe(otherGroup);
+    });
+
+    it('세 그룹의 작업이 dequeue+ack 사이클로 모두 처리된다', async () => {
+      // given
+      await enqueueJob('group-A', 'group-A-1');
+      await enqueueJob('group-A', 'group-A-2');
+      await enqueueJob('group-A', 'group-A-3');
+      await enqueueJob('group-B', 'group-B-1');
+      await enqueueJob('group-B', 'group-B-2');
+      await enqueueJob('group-B', 'group-B-3');
+      await enqueueJob('group-C', 'group-C-1');
+      await enqueueJob('group-C', 'group-C-2');
+      await enqueueJob('group-C', 'group-C-3');
+
+      // when - 9개 작업을 모두 dequeue + ack
+      const jobs = [];
+
+      for (let i = 0; i < 9; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        const job = await service.dequeue();
+        expectNonNullable(job);
+        // eslint-disable-next-line no-await-in-loop
+        await service.ack(job.id, job.groupId);
+        jobs.push(job);
+      }
+
+      // then - 각 그룹이 3개씩 처리된다
+      const countByGroup = new Map<string, number>();
+
+      for (const job of jobs) {
+        const count = countByGroup.get(job.groupId) ?? 0;
+        countByGroup.set(job.groupId, count + 1);
+      }
+      expect(countByGroup.get('group-A')).toBe(3);
+      expect(countByGroup.get('group-B')).toBe(3);
+      expect(countByGroup.get('group-C')).toBe(3);
+
+      // 모두 처리 후 큐가 비어있다
+      const result = await service.dequeue();
+      expect(result).toBeNull();
     });
   });
 
@@ -294,11 +400,15 @@ describe('FairQueueService', () => {
       expect(firstAck).toBe(false);
       expect(secondAck).toBe(true);
 
-      const meta = (await redisService.getHashAll(
+      const result = (await redisService.hash.getAll(
         `${KEY_PREFIX}group:group-1:meta`,
       )) as unknown as JobGroupHash;
-      expect(meta.status).toBe('AGGREGATING');
-      expect(meta.doneJobs).toBe('2');
+      expect(result.status).toBe('AGGREGATING');
+      expect(result.doneJobs).toBe('2');
     });
   });
+
+  async function enqueueJob(groupId: string, jobId: string): Promise<void> {
+    await service.enqueue({ groupId, jobId, type: 'SEND', payload: {} });
+  }
 });
