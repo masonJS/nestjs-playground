@@ -58,7 +58,21 @@ export class RedisKeyBuilder {
     return `${this.prefix}active-groups`;
   }
 
-  nonReadyCount(groupId: string): string {
-    return `${this.prefix}non-ready-count:${groupId}`;
+  // ── Congestion ──
+
+  congestionNonReadyCount(groupId: string): string {
+    return `${this.prefix}congestion:${groupId}:non-ready-count`;
+  }
+
+  congestionStats(groupId: string): string {
+    return `${this.prefix}congestion:${groupId}:stats`;
+  }
+
+  congestionHistory(groupId: string): string {
+    return `${this.prefix}congestion:${groupId}:history`;
+  }
+
+  congestionCompletedCount(groupId: string): string {
+    return `${this.prefix}congestion:${groupId}:completed-count`;
   }
 }
