@@ -96,26 +96,4 @@ export class NonReadyQueueService {
   async size(): Promise<number> {
     return this.redisService.sortedSet.count(this.keys.nonReadyQueue());
   }
-
-  async countByGroup(groupId: string): Promise<number> {
-    const count = await this.redisService.string.get(
-      this.keys.nonReadyCount(groupId),
-    );
-
-    return parseInt(count ?? '0', 10);
-  }
-
-  async incrementGroupCount(groupId: string): Promise<void> {
-    await this.redisService.string.increment(this.keys.nonReadyCount(groupId));
-  }
-
-  async decrementGroupCount(groupId: string): Promise<void> {
-    const result = await this.redisService.string.decrement(
-      this.keys.nonReadyCount(groupId),
-    );
-
-    if (result < 0) {
-      await this.redisService.string.set(this.keys.nonReadyCount(groupId), '0');
-    }
-  }
 }

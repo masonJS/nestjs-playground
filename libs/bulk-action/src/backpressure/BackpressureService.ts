@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RateLimiterService } from './RateLimiterService';
 import { ReadyQueueService } from './ReadyQueueService';
-import { NonReadyQueueService, NonReadyReason } from './NonReadyQueueService';
+import { CongestionControlService } from '../congestion/CongestionControlService';
 import { Job } from '../model/Job';
 
 export interface BackpressureResult {
@@ -15,7 +15,7 @@ export class BackpressureService {
   constructor(
     private readonly rateLimiter: RateLimiterService,
     private readonly readyQueue: ReadyQueueService,
-    private readonly nonReadyQueue: NonReadyQueueService,
+    private readonly congestionControl: CongestionControlService,
   ) {}
 
   async admit(job: Job): Promise<BackpressureResult> {
@@ -45,38 +45,26 @@ export class BackpressureService {
       return { accepted: true, destination: 'ready' };
     }
 
-    const backoffMs = this.calculateBackoff();
-    await this.nonReadyQueue.push(
+    const backoffResult = await this.congestionControl.addToNonReady(
       job.id,
-      backoffMs,
-      NonReadyReason.RATE_LIMITED,
+      job.groupId,
     );
-    await this.nonReadyQueue.incrementGroupCount(job.groupId);
 
     return {
       accepted: true,
       destination: 'non-ready',
       reason:
         `Rate limited (global: ${rateLimitResult.globalCount}/${rateLimitResult.globalLimit}, ` +
-        `group: ${rateLimitResult.groupCount}/${rateLimitResult.perGroupLimit})`,
+        `group: ${rateLimitResult.groupCount}/${rateLimitResult.perGroupLimit}, ` +
+        `congestion: ${backoffResult.congestionLevel})`,
     };
   }
 
   async requeue(
     jobId: string,
     groupId: string,
-    retryCount: number,
+    _retryCount: number,
   ): Promise<void> {
-    await this.nonReadyQueue.pushWithExponentialBackoff(
-      jobId,
-      retryCount,
-      NonReadyReason.TRANSIENT_ERROR,
-    );
-    await this.nonReadyQueue.incrementGroupCount(groupId);
-  }
-
-  // Step 3 혼잡 제어에서 동적 backoff 계산으로 교체 예정
-  private calculateBackoff(): number {
-    return 1000;
+    await this.congestionControl.addToNonReady(jobId, groupId);
   }
 }

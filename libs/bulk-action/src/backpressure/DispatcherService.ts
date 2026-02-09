@@ -96,6 +96,7 @@ export class DispatcherService implements OnModuleDestroy {
       [
         Date.now().toString(),
         this.config.backpressure.dispatchBatchSize.toString(),
+        this.keys.getPrefix(),
       ],
     );
 
