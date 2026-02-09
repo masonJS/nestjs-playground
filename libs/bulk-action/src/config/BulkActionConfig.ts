@@ -21,10 +21,18 @@ export interface BackpressureConfig {
   maxBackoffMs: number;
 }
 
+export interface CongestionConfig {
+  enabled: boolean;
+  baseBackoffMs: number;
+  maxBackoffMs: number;
+  statsRetentionMs: number;
+}
+
 export interface BulkActionConfig {
   redis: BulkActionRedisConfig;
   fairQueue: FairQueueConfig;
   backpressure: BackpressureConfig;
+  congestion: CongestionConfig;
 }
 
 export const DEFAULT_FAIR_QUEUE_CONFIG: FairQueueConfig = {
@@ -40,4 +48,11 @@ export const DEFAULT_BACKPRESSURE_CONFIG: BackpressureConfig = {
   dispatchBatchSize: 100,
   defaultBackoffMs: 1000,
   maxBackoffMs: 60000,
+};
+
+export const DEFAULT_CONGESTION_CONFIG: CongestionConfig = {
+  enabled: true,
+  baseBackoffMs: 1000,
+  maxBackoffMs: 120000,
+  statsRetentionMs: 3600000,
 };
