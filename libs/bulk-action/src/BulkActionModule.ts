@@ -10,10 +10,14 @@ import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
   BulkActionRedisConfig,
+  CongestionConfig,
   DEFAULT_BACKPRESSURE_CONFIG,
+  DEFAULT_CONGESTION_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
   FairQueueConfig,
 } from './config/BulkActionConfig';
+import { CongestionControlService } from './congestion/CongestionControlService';
+import { CongestionStatsService } from './congestion/CongestionStatsService';
 import { FairQueueService } from './fair-queue/FairQueueService';
 import { RedisKeyBuilder } from './key/RedisKeyBuilder';
 import { LuaScriptLoader } from './lua/LuaScriptLoader';
@@ -24,6 +28,7 @@ export class BulkActionModule {
     config: { redis: BulkActionRedisConfig } & {
       fairQueue?: Partial<FairQueueConfig>;
       backpressure?: Partial<BackpressureConfig>;
+      congestion?: Partial<CongestionConfig>;
     },
   ): DynamicModule {
     const mergedConfig: BulkActionConfig = {
@@ -35,6 +40,10 @@ export class BulkActionModule {
       backpressure: {
         ...DEFAULT_BACKPRESSURE_CONFIG,
         ...config.backpressure,
+      },
+      congestion: {
+        ...DEFAULT_CONGESTION_CONFIG,
+        ...config.congestion,
       },
     };
 
@@ -61,8 +70,15 @@ export class BulkActionModule {
         NonReadyQueueService,
         DispatcherService,
         BackpressureService,
+        CongestionControlService,
+        CongestionStatsService,
       ],
-      exports: [FairQueueService, BackpressureService, ReadyQueueService],
+      exports: [
+        FairQueueService,
+        BackpressureService,
+        ReadyQueueService,
+        CongestionControlService,
+      ],
     };
   }
 }
