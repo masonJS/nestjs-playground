@@ -7,6 +7,7 @@ import { LuaScriptLoader } from '@app/bulk-action/lua/LuaScriptLoader';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
+  DEFAULT_CONGESTION_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { ReadyQueueService } from '@app/bulk-action/backpressure/ReadyQueueService';
@@ -38,6 +39,7 @@ describe('ReadyQueueService', () => {
       defaultBackoffMs: 1000,
       maxBackoffMs: 60000,
     },
+    congestion: DEFAULT_CONGESTION_CONFIG,
   };
 
   beforeAll(async () => {

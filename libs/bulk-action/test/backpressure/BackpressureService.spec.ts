@@ -7,12 +7,14 @@ import { LuaScriptLoader } from '@app/bulk-action/lua/LuaScriptLoader';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
+  DEFAULT_CONGESTION_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { RateLimiterService } from '@app/bulk-action/backpressure/RateLimiterService';
 import { ReadyQueueService } from '@app/bulk-action/backpressure/ReadyQueueService';
 import { NonReadyQueueService } from '@app/bulk-action/backpressure/NonReadyQueueService';
 import { BackpressureService } from '@app/bulk-action/backpressure/BackpressureService';
+import { CongestionControlService } from '@app/bulk-action/congestion/CongestionControlService';
 import { Job, JobStatus } from '@app/bulk-action/model/Job';
 
 function createMockJob(id: string, groupId: string): Job {
@@ -56,6 +58,7 @@ describe('BackpressureService', () => {
       defaultBackoffMs: 1000,
       maxBackoffMs: 60000,
     },
+    congestion: DEFAULT_CONGESTION_CONFIG,
   };
 
   beforeAll(async () => {
@@ -78,6 +81,7 @@ describe('BackpressureService', () => {
         RateLimiterService,
         ReadyQueueService,
         NonReadyQueueService,
+        CongestionControlService,
         BackpressureService,
       ],
     }).compile();
@@ -175,10 +179,9 @@ describe('BackpressureService', () => {
 
       // then
       expect(await nonReadyQueue.size()).toBe(1);
-      expect(await nonReadyQueue.countByGroup('customer-A')).toBe(1);
     });
 
-    it('retryCount에 따라 지수 백오프가 적용된다', async () => {
+    it('여러 작업 requeue 시 Non-ready Queue에 모두 등록된다', async () => {
       // when
       await backpressure.requeue('job-fail-0', 'customer-A', 0);
       await backpressure.requeue('job-fail-3', 'customer-A', 3);

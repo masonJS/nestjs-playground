@@ -6,6 +6,7 @@ import { RedisService } from '@app/redis/RedisService';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
+  DEFAULT_CONGESTION_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
@@ -41,6 +42,7 @@ describe('NonReadyQueueService', () => {
       defaultBackoffMs: 1000,
       maxBackoffMs: 60000,
     },
+    congestion: DEFAULT_CONGESTION_CONFIG,
   };
 
   beforeAll(async () => {
@@ -171,32 +173,6 @@ describe('NonReadyQueueService', () => {
 
       // then
       expect(await service.size()).toBe(1);
-    });
-  });
-
-  describe('group counter', () => {
-    it('그룹별 카운터를 증감할 수 있다', async () => {
-      // when
-      await service.incrementGroupCount('group-A');
-      await service.incrementGroupCount('group-A');
-      await service.incrementGroupCount('group-A');
-
-      // then
-      expect(await service.countByGroup('group-A')).toBe(3);
-
-      // when
-      await service.decrementGroupCount('group-A');
-
-      // then
-      expect(await service.countByGroup('group-A')).toBe(2);
-    });
-
-    it('카운터가 0 이하로 내려가면 0으로 보정한다', async () => {
-      // when
-      await service.decrementGroupCount('group-A');
-
-      // then
-      expect(await service.countByGroup('group-A')).toBe(0);
     });
   });
 });
