@@ -14,6 +14,8 @@ export class LuaScriptLoader implements OnModuleInit {
     await this.loadScript('rateLimitCheck', 'rate-limit-check.lua', 3);
     await this.loadScript('readyQueuePush', 'ready-queue-push.lua', 1);
     await this.loadScript('moveToReady', 'move-to-ready.lua', 2);
+    await this.loadScript('congestionBackoff', 'congestion-backoff.lua', 4);
+    await this.loadScript('congestionRelease', 'congestion-release.lua', 2);
   }
 
   private async loadScript(
