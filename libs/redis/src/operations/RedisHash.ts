@@ -10,4 +10,8 @@ export class RedisHash {
   async get(key: string, field: string): Promise<string | null> {
     return this.client.hget(key, field);
   }
+
+  async set(key: string, field: string, value: string): Promise<number> {
+    return this.client.hset(key, field, value);
+  }
 }

@@ -14,4 +14,8 @@ export class RedisSet {
   async size(key: string): Promise<number> {
     return this.client.scard(key);
   }
+
+  async members(key: string): Promise<string[]> {
+    return this.client.smembers(key);
+  }
 }

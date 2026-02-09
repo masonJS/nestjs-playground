@@ -66,6 +66,10 @@ export class RedisService implements OnModuleDestroy {
     return (command as Function).call(this.client, ...keys, ...args);
   }
 
+  async delete(...keys: string[]): Promise<number> {
+    return this.client.del(...keys);
+  }
+
   async flushDatabase(): Promise<string> {
     return this.client.flushdb();
   }

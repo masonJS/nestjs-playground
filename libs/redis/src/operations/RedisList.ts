@@ -19,6 +19,10 @@ export class RedisList {
     return this.client.lpop(key);
   }
 
+  async trim(key: string, start: number, stop: number): Promise<string> {
+    return this.client.ltrim(key, start, stop);
+  }
+
   async blockingPopHead(
     key: string,
     timeoutSec: number,
