@@ -241,6 +241,8 @@ bulk-action:active-groups                       # Set
 # 추가 (Step 3)
 bulk-action:congestion:{groupId}:non-ready-count   # String - 그룹별 Non-ready 작업 수
 bulk-action:congestion:{groupId}:stats             # Hash - 그룹별 혼잡 통계
+bulk-action:congestion:{groupId}:history           # List - 혼잡도 히스토리 (시계열 스냅샷)
+bulk-action:congestion:{groupId}:completed-count   # String - 그룹별 완료 작업 수 (평균 계산용)
 ```
 
 ### 그룹별 혼잡 통계 (Hash)
@@ -250,15 +252,15 @@ bulk-action:congestion:{groupId}:stats             # Hash - 그룹별 혼잡 통
 ```
 Key: bulk-action:congestion:customer-A:stats
 Type: Hash
-┌──────────────────────┬───────┐
-│ field                │ value │
-├──────────────────────┼───────┤
-│ totalThrottleCount   │ 45    │  ← 누적 쓰로틀링 횟수
-│ lastThrottleAt       │ 17060 │  ← 마지막 쓰로틀링 시각
-│ lastBackoffMs        │ 6000  │  ← 마지막 적용된 backoff
-│ avgThrottlePerJob    │ 1.45  │  ← 작업당 평균 쓰로틀링
-│ currentNonReadyCount │ 300   │  ← 현재 Non-ready 작업 수
-└──────────────────────┴───────┘
+┌──────────────────────┬────────────────┐
+│ field                │ value          │
+├──────────────────────┼────────────────┤
+│ currentNonReadyCount │ 300            │  ← 현재 Non-ready 작업 수
+│ lastBackoffMs        │ 6000           │  ← 마지막 적용된 backoff
+│ rateLimitSpeed       │ 100            │  ← 마지막 계산된 그룹별 RPS
+│ lastUpdatedMs        │ 1707000000000  │  ← 마지막 갱신 시각 (epoch ms)
+│ avgThrottlePerJob    │ 1.45           │  ← 작업당 평균 쓰로틀링 (CongestionStatsService가 갱신)
+└──────────────────────┴────────────────┘
 ```
 
 ### ⚠️ ioredis keyPrefix와 Lua 스크립트 키 충돌 주의
@@ -285,72 +287,80 @@ Lua 내부에서 redis.call('HGET', 'bulk-action:job:' .. jobId, 'groupId')
 3. `keyPrefix`를 사용하지 않고, 서비스 레이어에서 키 이름에 접두사를 직접 붙인다.
 
 > Step 1의 `dequeue.lua`에서 동일한 이슈가 식별되어 수정된 바 있다.
-> `congestion_backoff.lua`는 현재 KEYS[]로만 키를 받으므로 문제가 없지만,
-> 이슈 #2에서 제안한 `move_to_ready.lua` 확장(내부 키 구성)을 적용할 때 반드시 이 점을 고려해야 한다.
+> `congestion-backoff.lua`는 모든 키를 KEYS[]로 전달받으므로 문제가 없다.
+> `move-to-ready.lua`는 congestion 카운터 감소를 위해 내부에서 키를 구성하므로,
+> 서비스 레이어에서 `RedisKeyBuilder.getPrefix()`를 ARGV[3]로 전달하는 방식(해결 방법 2)을 채택했다.
 
-### Lua 스크립트: congestion_backoff.lua
+### Lua 스크립트: congestion-backoff.lua
 
 Non-ready Queue에 작업을 추가하면서 backoff를 동적으로 계산하는 스크립트이다.
 
 ```lua
 -- KEYS[1]: non-ready queue (Sorted Set)
--- KEYS[2]: congestion stats (Hash)
--- KEYS[3]: congestion non-ready-count (String)
--- KEYS[4]: active-groups (Set)
+-- KEYS[2]: congestion stats Hash
+-- KEYS[3]: congestion non-ready count
+-- KEYS[4]: active-groups Set
 -- ARGV[1]: jobId
--- ARGV[2]: groupId
--- ARGV[3]: globalRps
--- ARGV[4]: 기본 backoff (ms)
--- ARGV[5]: 최대 backoff (ms) ← 추가
+-- ARGV[2]: globalRps
+-- ARGV[3]: baseBackoffMs
+-- ARGV[4]: maxBackoffMs
+-- ARGV[5]: currentTimeMs (Date.now())
 
--- 1. 그룹별 Non-ready 카운트 증가
+-- 1. Increment non-ready count for this group
 local nonReadyCount = redis.call('INCR', KEYS[3])
 
--- 2. 활성 그룹 수 조회
-local activeGroupCount = redis.call('SCARD', KEYS[4])
-activeGroupCount = math.max(1, activeGroupCount)
-
--- 3. 그룹별 Rate Limit 속도 계산
-local globalRps = tonumber(ARGV[3])
-local rateLimitSpeed = math.max(1, math.floor(globalRps / activeGroupCount))
-
--- 4. 동적 backoff 계산
-local baseBackoff = tonumber(ARGV[4])
-local maxBackoff = tonumber(ARGV[5])
-local additionalBackoff = math.floor(nonReadyCount / rateLimitSpeed) * 1000
-local backoffMs = baseBackoff + additionalBackoff
-
--- ⚠ maxBackoff 상한 적용: ZADD의 score에도 상한이 반영되어야
---   Service 레이어의 Math.min()과 실제 score가 일치한다.
-if backoffMs > maxBackoff then
-  backoffMs = maxBackoff
+-- 2. Get active group count
+local activeGroups = redis.call('SCARD', KEYS[4])
+if activeGroups < 1 then
+  activeGroups = 1
 end
 
--- 5. Non-ready Queue에 추가 (score = 실행 가능 시각)
-local now = redis.call('TIME')
-local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
-local executeAt = nowMs + backoffMs
+-- 3. Calculate rate limit speed per group
+local globalRps = tonumber(ARGV[2])
+local rateLimitSpeed = math.max(1, math.floor(globalRps / activeGroups))
+
+-- 4. Calculate dynamic backoff
+local baseBackoffMs = tonumber(ARGV[3])
+local maxBackoffMs = tonumber(ARGV[4])
+local currentTimeMs = tonumber(ARGV[5])
+
+local backoffMs = baseBackoffMs + math.floor(nonReadyCount / rateLimitSpeed) * 1000
+if backoffMs > maxBackoffMs then
+  backoffMs = maxBackoffMs
+end
+
+-- 5. Add job to non-ready queue with calculated execute-at time
+local executeAt = currentTimeMs + backoffMs
 redis.call('ZADD', KEYS[1], executeAt, ARGV[1])
 
--- 6. 혼잡 통계 갱신
-redis.call('HINCRBY', KEYS[2], 'totalThrottleCount', 1)
-redis.call('HSET', KEYS[2], 'lastThrottleAt', tostring(nowMs))
-redis.call('HSET', KEYS[2], 'lastBackoffMs', tostring(backoffMs))
-redis.call('HSET', KEYS[2], 'currentNonReadyCount', tostring(nonReadyCount))
+-- 6. Update congestion stats
+redis.call('HSET', KEYS[2],
+  'currentNonReadyCount', tostring(nonReadyCount),
+  'lastBackoffMs', tostring(backoffMs),
+  'rateLimitSpeed', tostring(rateLimitSpeed),
+  'lastUpdatedMs', tostring(currentTimeMs)
+)
 
 return {backoffMs, nonReadyCount, rateLimitSpeed}
 ```
 
-### Lua 스크립트: congestion_release.lua
+> **설계 변경 사항 (구현 시 반영):**
+> - `groupId`를 ARGV에서 제거: 서비스 레이어에서 그룹별 키를 KEYS[]로 분리 전달하므로 Lua 내부에서 groupId가 불필요.
+> - `redis.call('TIME')` → `Date.now()` ARGV 전달: Redis TIME 명령 대신 서비스 레이어에서 현재 시각을 전달하여 테스트 가능성 향상.
+> - `HINCRBY totalThrottleCount` 제거: 누적 쓰로틀링 횟수는 `CongestionStatsService`에서 별도 관리.
+
+### Lua 스크립트: congestion-release.lua
 
 Non-ready Queue에서 작업이 빠져나갈 때 카운트를 감소시키는 스크립트이다.
 
 ```lua
--- KEYS[1]: congestion non-ready-count (String)
--- KEYS[2]: congestion stats (Hash)
--- ARGV[1]: 감소 수량
+-- KEYS[1]: congestion non-ready count
+-- KEYS[2]: congestion stats Hash
+-- ARGV[1]: decreaseCount
 
-local newCount = redis.call('DECRBY', KEYS[1], tonumber(ARGV[1]))
+local decreaseCount = tonumber(ARGV[1])
+local newCount = redis.call('DECRBY', KEYS[1], decreaseCount)
+
 if newCount < 0 then
   newCount = 0
   redis.call('SET', KEYS[1], '0')
@@ -368,83 +378,104 @@ return newCount
 ### 디렉토리 구조
 
 ```
-libs/bulk-action/src/
-├── congestion/
-│   ├── congestion-control.service.ts         # 혼잡 제어 핵심 서비스
-│   ├── congestion-control.service.spec.ts    # 단위 테스트
-│   ├── backoff-calculator.ts                 # backoff 계산 유틸리티
-│   ├── backoff-calculator.spec.ts            # 계산기 테스트
-│   ├── congestion-stats.service.ts           # 혼잡 통계 조회/관리
-│   └── congestion.constants.ts               # 상수 정의
-├── config/
-│   └── bulk-action.config.ts                 # congestion 설정 추가
-└── lua/
-    ├── congestion_backoff.lua                # 동적 backoff + Non-ready 추가
-    └── congestion_release.lua                # Non-ready 카운트 감소
+libs/bulk-action/
+├── src/
+│   ├── congestion/
+│   │   ├── BackoffCalculator.ts              # backoff 계산 유틸리티 + CongestionLevel enum
+│   │   ├── CongestionControlService.ts       # 혼잡 제어 핵심 서비스
+│   │   └── CongestionStatsService.ts         # 혼잡 통계 조회/관리
+│   ├── config/
+│   │   └── BulkActionConfig.ts               # congestion 설정 포함
+│   ├── key/
+│   │   └── RedisKeyBuilder.ts                # congestion 키 빌더 메서드 포함
+│   └── lua/
+│       ├── congestion-backoff.lua            # 동적 backoff + Non-ready 추가
+│       ├── congestion-release.lua            # Non-ready 카운트 감소
+│       ├── move-to-ready.lua                 # Dispatcher용 (congestion 카운터 감소 통합)
+│       └── LuaScriptLoader.ts               # Lua 스크립트 등록
+└── test/
+    └── congestion/
+        ├── BackoffCalculator.spec.ts         # 계산기 단위 테스트
+        └── CongestionControlService.spec.ts  # 통합 테스트 (실제 Redis)
 ```
 
 ### 설정 확장
 
-**`config/bulk-action.config.ts`** (Step 2에서 확장)
+**`config/BulkActionConfig.ts`**
+
+각 섹션별 인터페이스와 기본값이 분리되어 있으며, `BulkActionModule.register()`에서 deep merge된다.
 
 ```typescript
-export interface BulkActionConfig {
-  redis: {
-    host: string;
-    port: number;
-    password?: string;
-    db?: number;
-    keyPrefix?: string;
-  };
-  fairQueue: {
-    alpha: number;
-  };
-  backpressure: {
-    globalRps: number;
-    readyQueueMaxSize: number;
-    rateLimitWindowSec: number;
-    rateLimitKeyTtlSec: number;
-    dispatchIntervalMs: number;
-    dispatchBatchSize: number;
-    defaultBackoffMs: number;
-    maxBackoffMs: number;
-  };
-  congestion: {
-    enabled: boolean;             // 혼잡 제어 활성화 여부 (default: true)
-    baseBackoffMs: number;        // 기본 backoff (default: 1000)
-    maxBackoffMs: number;         // 최대 backoff 상한 (default: 120000)
-    statsRetentionMs: number;     // 통계 보관 기간 (default: 3600000 = 1시간)
-  };
+import { RedisConfig } from '@app/redis/RedisConfig';
+
+export const BULK_ACTION_CONFIG = Symbol('BULK_ACTION_CONFIG');
+
+export interface BulkActionRedisConfig extends RedisConfig {
+  keyPrefix?: string;
 }
 
-export const DEFAULT_BULK_ACTION_CONFIG: BulkActionConfig = {
-  redis: {
-    host: 'localhost',
-    port: 6379,
-    db: 0,
-    keyPrefix: 'bulk-action:',
-  },
-  fairQueue: {
-    alpha: 10000,
-  },
-  backpressure: {
-    globalRps: 10000,
-    readyQueueMaxSize: 10000,
-    rateLimitWindowSec: 1,
-    rateLimitKeyTtlSec: 2,
-    dispatchIntervalMs: 100,
-    dispatchBatchSize: 100,
-    defaultBackoffMs: 1000,
-    maxBackoffMs: 60000,
-  },
-  congestion: {
-    enabled: true,
-    baseBackoffMs: 1000,
-    maxBackoffMs: 120000,
-    statsRetentionMs: 3600000,
-  },
+export interface FairQueueConfig {
+  alpha: number;
+}
+
+export interface BackpressureConfig {
+  globalRps: number;
+  readyQueueMaxSize: number;
+  rateLimitWindowSec: number;
+  rateLimitKeyTtlSec: number;
+  dispatchIntervalMs: number;
+  dispatchBatchSize: number;
+  defaultBackoffMs: number;
+  maxBackoffMs: number;
+}
+
+export interface CongestionConfig {
+  enabled: boolean;              // 혼잡 제어 활성화 여부 (default: true)
+  baseBackoffMs: number;         // 기본 backoff (default: 1000)
+  maxBackoffMs: number;          // 최대 backoff 상한 (default: 120000)
+  statsRetentionMs: number;      // 통계 보관 기간 (default: 3600000 = 1시간)
+}
+
+export interface WorkerPoolConfig {
+  workerCount: number;
+  fetchIntervalMs: number;
+  fetchBatchSize: number;
+  workerTimeoutSec: number;
+  jobTimeoutMs: number;
+  maxRetryCount: number;
+  shutdownGracePeriodMs: number;
+}
+
+export interface BulkActionConfig {
+  redis: BulkActionRedisConfig;
+  fairQueue: FairQueueConfig;
+  backpressure: BackpressureConfig;
+  congestion: CongestionConfig;
+  workerPool: WorkerPoolConfig;
+}
+
+export const DEFAULT_CONGESTION_CONFIG: CongestionConfig = {
+  enabled: true,
+  baseBackoffMs: 1000,
+  maxBackoffMs: 120000,
+  statsRetentionMs: 3600000,
+};
+
+export const DEFAULT_WORKER_POOL_CONFIG: WorkerPoolConfig = {
+  workerCount: 10,
+  fetchIntervalMs: 200,
+  fetchBatchSize: 50,
+  workerTimeoutSec: 5,
+  jobTimeoutMs: 30000,
+  maxRetryCount: 3,
+  shutdownGracePeriodMs: 30000,
 };
 ```
+
+> **구현 변경 사항:**
+> - `redis` 타입이 `RedisConfig`를 확장하는 `BulkActionRedisConfig`로 변경 (공용 Redis 설정 재사용).
+> - 기본값이 `DEFAULT_BULK_ACTION_CONFIG` 단일 객체가 아닌 섹션별 상수(`DEFAULT_CONGESTION_CONFIG`, `DEFAULT_WORKER_POOL_CONFIG` 등)로 분리.
+> - Step 4 구현에 따라 `workerPool` 섹션 추가.
 
 ---
 
@@ -452,9 +483,17 @@ export const DEFAULT_BULK_ACTION_CONFIG: BulkActionConfig = {
 
 ### Backoff Calculator
 
-**`congestion/backoff-calculator.ts`**
+**`congestion/BackoffCalculator.ts`**
 
 ```typescript
+export enum CongestionLevel {
+  NONE = 'NONE',         // backoff = base (혼잡 없음)
+  LOW = 'LOW',           // backoff < base * 3
+  MODERATE = 'MODERATE', // backoff < base * 10
+  HIGH = 'HIGH',         // backoff < base * 30
+  CRITICAL = 'CRITICAL', // backoff >= base * 30
+}
+
 export interface BackoffParams {
   nonReadyCount: number;     // 그룹의 Non-ready Queue 작업 수
   rateLimitSpeed: number;    // 그룹의 초당 처리 가능 수 (perGroupLimit)
@@ -464,57 +503,34 @@ export interface BackoffParams {
 
 export interface BackoffResult {
   backoffMs: number;         // 계산된 backoff (ms)
-  estimatedWaitSec: number;  // 예상 대기 시간 (초, 소수점)
+  nonReadyCount: number;     // 현재 Non-ready 작업 수
+  rateLimitSpeed: number;    // 적용된 그룹별 RPS
   congestionLevel: CongestionLevel;
 }
 
-export enum CongestionLevel {
-  NONE = 'NONE',         // backoff = base (혼잡 없음)
-  LOW = 'LOW',           // backoff < base * 3
-  MODERATE = 'MODERATE', // backoff < base * 10
-  HIGH = 'HIGH',         // backoff < base * 30
-  CRITICAL = 'CRITICAL', // backoff >= base * 30
-}
-
 export class BackoffCalculator {
-  /**
-   * 동적 backoff를 계산한다.
-   *
-   * 공식: baseBackoff + floor(nonReadyCount / rateLimitSpeed) * 1000
-   *
-   * Non-ready Queue에 쌓인 작업 수와 Rate Limit 처리 속도를 기반으로
-   * "이 작업의 차례가 올 때까지 예상 대기 시간"을 계산한다.
-   */
   static calculate(params: BackoffParams): BackoffResult {
     const { nonReadyCount, rateLimitSpeed, baseBackoffMs, maxBackoffMs } = params;
-
     const safeSpeed = Math.max(1, rateLimitSpeed);
-    const additionalBackoffMs = Math.floor(nonReadyCount / safeSpeed) * 1000;
-    const rawBackoff = baseBackoffMs + additionalBackoffMs;
-    const backoffMs = Math.min(rawBackoff, maxBackoffMs);
 
-    const estimatedWaitSec = backoffMs / 1000;
-    const congestionLevel = this.classifyCongestion(backoffMs, baseBackoffMs);
+    const backoffMs = Math.min(
+      baseBackoffMs + Math.floor(nonReadyCount / safeSpeed) * 1000,
+      maxBackoffMs,
+    );
 
-    return { backoffMs, estimatedWaitSec, congestionLevel };
+    return {
+      backoffMs,
+      nonReadyCount,
+      rateLimitSpeed: safeSpeed,
+      congestionLevel: BackoffCalculator.classify(backoffMs, baseBackoffMs),
+    };
   }
 
-  /**
-   * 혼잡도를 분류한다.
-   * CongestionControlService.addToNonReady()에서 Lua 결과의 backoffMs로
-   * CongestionLevel만 산출할 때 사용한다.
-   */
   static classify(backoffMs: number, baseBackoffMs: number): CongestionLevel {
-    return this.classifyCongestion(backoffMs, baseBackoffMs);
-  }
+    if (baseBackoffMs <= 0) {
+      return CongestionLevel.NONE;
+    }
 
-  /**
-   * 혼잡도를 분류한다 (내부 구현).
-   */
-  private static classifyCongestion(
-    backoffMs: number,
-    baseBackoffMs: number,
-  ): CongestionLevel {
     const ratio = backoffMs / baseBackoffMs;
 
     if (ratio <= 1) return CongestionLevel.NONE;
@@ -524,356 +540,307 @@ export class BackoffCalculator {
     return CongestionLevel.CRITICAL;
   }
 
-  /**
-   * 주어진 파라미터로 예상 처리 완료 시각을 계산한다.
-   * 모니터링 대시보드에서 사용한다.
-   */
-  static estimateCompletionTime(params: {
-    totalPending: number;
-    rateLimitSpeed: number;
-  }): { estimatedSeconds: number; estimatedAt: Date } {
-    const seconds = Math.ceil(params.totalPending / Math.max(1, params.rateLimitSpeed));
-    return {
-      estimatedSeconds: seconds,
-      estimatedAt: new Date(Date.now() + seconds * 1000),
-    };
+  static estimateCompletionTime(
+    nonReadyCount: number,
+    rateLimitSpeed: number,
+  ): number {
+    const safeSpeed = Math.max(1, rateLimitSpeed);
+    return Math.ceil(nonReadyCount / safeSpeed) * 1000;
   }
 }
 ```
 
+> **구현 변경 사항:**
+> - `BackoffResult`에서 `estimatedWaitSec` 제거, `nonReadyCount`/`rateLimitSpeed` 추가 — Lua 결과를 그대로 전달하는 구조.
+> - `classify()`가 `baseBackoffMs <= 0` 방어 로직 추가.
+> - `estimateCompletionTime()`이 객체 파라미터 대신 positional 파라미터로 단순화, 반환값도 `number`(ms)로 변경.
+
 ### Congestion Control Service
 
-**`congestion/congestion-control.service.ts`**
+**`congestion/CongestionControlService.ts`**
 
 ```typescript
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
 import {
   BackoffCalculator,
   BackoffResult,
   CongestionLevel,
-} from './backoff-calculator';
+} from './BackoffCalculator';
+
+export interface GroupCongestionState {
+  groupId: string;
+  nonReadyCount: number;
+  rateLimitSpeed: number;
+  lastBackoffMs: number;
+  congestionLevel: CongestionLevel;
+}
+
+export interface SystemCongestionSummary {
+  totalNonReadyCount: number;
+  activeGroupCount: number;
+  groups: GroupCongestionState[];
+}
 
 @Injectable()
 export class CongestionControlService {
   private readonly logger = new Logger(CongestionControlService.name);
 
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly keys: RedisKeyBuilder,
   ) {}
 
-  /**
-   * 동적 backoff를 계산하여 Non-ready Queue에 작업을 추가한다.
-   *
-   * Lua 스크립트로 다음을 원자적으로 수행:
-   * 1. 그룹별 Non-ready 카운트 증가
-   * 2. 활성 그룹 수 기반 rateLimitSpeed 계산
-   * 3. 동적 backoff 계산
-   * 4. Non-ready Queue에 score(=실행가능시각)와 함께 추가
-   * 5. 혼잡 통계 갱신
-   */
   async addToNonReady(jobId: string, groupId: string): Promise<BackoffResult> {
     if (!this.config.congestion.enabled) {
-      return this.addWithFixedBackoff(jobId, groupId);
+      return this.fixedBackoff(jobId, groupId);
     }
 
-    const nonReadyQueueKey = 'non-ready-queue';
-    const statsKey = `congestion:${groupId}:stats`;
-    const countKey = `congestion:${groupId}:non-ready-count`;
-    const activeGroupsKey = 'active-groups';
-
     try {
-      const result = await (this.redis as any).congestion_backoff(
-        nonReadyQueueKey,
-        statsKey,
-        countKey,
-        activeGroupsKey,
-        jobId,
-        groupId,
-        this.config.backpressure.globalRps.toString(),
-        this.config.congestion.baseBackoffMs.toString(),
+      const result = (await this.redisService.callCommand(
+        'congestionBackoff',
+        [
+          this.keys.nonReadyQueue(),
+          this.keys.congestionStats(groupId),
+          this.keys.congestionNonReadyCount(groupId),
+          this.keys.activeGroups(),
+        ],
+        [
+          jobId,
+          this.config.backpressure.globalRps.toString(),
+          this.config.congestion.baseBackoffMs.toString(),
+          this.config.congestion.maxBackoffMs.toString(),
+          Date.now().toString(),
+        ],
+      )) as number[];
+
+      const backoffResult = BackoffCalculator.calculate({
+        nonReadyCount: result[1],
+        rateLimitSpeed: result[2],
+        baseBackoffMs: this.config.congestion.baseBackoffMs,
+        maxBackoffMs: this.config.congestion.maxBackoffMs,
+      });
+
+      this.logger.debug(
+        `Job ${jobId} -> Non-ready (group=${groupId}, backoff=${backoffResult.backoffMs}ms, ` +
+          `level=${backoffResult.congestionLevel}, count=${backoffResult.nonReadyCount})`,
       );
-
-      const backoffMs = result[0];
-      const nonReadyCount = result[1];
-      const rateLimitSpeed = result[2];
-
-      // ⚠️ Lua 스크립트가 이미 backoff를 계산하여 ZADD score에 반영했으므로,
-      // 여기서 BackoffCalculator.calculate()를 다시 호출하는 것은
-      // "backoff 재계산"이 아니라 CongestionLevel 분류와 estimatedWaitSec 산출 용도이다.
-      // 실제 Non-ready Queue에 기록된 score(=executeAt)는 Lua 결과를 사용한다.
-      const backoffResult: BackoffResult = {
-        backoffMs,
-        estimatedWaitSec: backoffMs / 1000,
-        congestionLevel: BackoffCalculator.classify(backoffMs, this.config.congestion.baseBackoffMs),
-      };
-
-      this.logCongestionState(groupId, backoffResult, nonReadyCount, rateLimitSpeed);
 
       return backoffResult;
     } catch (error) {
       this.logger.error(
-        `Congestion backoff failed for job ${jobId}: ${error.message}`,
-        error.stack,
+        `Congestion backoff failed for ${jobId}, falling back to fixed: ${
+          (error as Error).message
+        }`,
       );
-      // 폴백: 고정 backoff
-      return this.addWithFixedBackoff(jobId, groupId);
+
+      return this.fixedBackoff(jobId, groupId);
     }
   }
 
-  /**
-   * Non-ready Queue에서 작업이 빠져나갈 때 카운트를 감소시킨다.
-   * Dispatcher가 move_to_ready 수행 후 호출한다.
-   */
   async releaseFromNonReady(groupId: string, count: number): Promise<number> {
-    const countKey = `congestion:${groupId}:non-ready-count`;
-    const statsKey = `congestion:${groupId}:stats`;
+    try {
+      const result = await this.redisService.callCommand(
+        'congestionRelease',
+        [
+          this.keys.congestionNonReadyCount(groupId),
+          this.keys.congestionStats(groupId),
+        ],
+        [count.toString()],
+      );
 
-    const newCount = await (this.redis as any).congestion_release(
-      countKey,
-      statsKey,
-      count.toString(),
-    );
+      return result as number;
+    } catch (error) {
+      this.logger.error(
+        `Congestion release failed for ${groupId}: ${(error as Error).message}`,
+      );
 
-    return newCount;
+      return 0;
+    }
   }
 
-  /**
-   * 특정 그룹의 현재 혼잡 상태를 조회한다.
-   */
   async getCongestionState(groupId: string): Promise<GroupCongestionState> {
-    const countKey = `congestion:${groupId}:non-ready-count`;
-    const statsKey = `congestion:${groupId}:stats`;
-    const activeGroupsKey = 'active-groups';
-
-    const [nonReadyCount, stats, activeGroupCount] = await Promise.all([
-      this.redis.get(countKey).then((v) => parseInt(v ?? '0', 10)),
-      this.redis.hgetall(statsKey),
-      this.redis.scard(activeGroupsKey),
+    const [countRaw, stats, activeGroupCount] = await Promise.all([
+      this.redisService.string.get(this.keys.congestionNonReadyCount(groupId)),
+      this.redisService.hash.getAll(this.keys.congestionStats(groupId)),
+      this.redisService.set.size(this.keys.activeGroups()),
     ]);
 
+    const nonReadyCount = parseInt(countRaw ?? '0', 10);
     const rateLimitSpeed = Math.max(
       1,
-      Math.floor(this.config.backpressure.globalRps / Math.max(1, activeGroupCount)),
+      Math.floor(
+        this.config.backpressure.globalRps / Math.max(1, activeGroupCount),
+      ),
     );
-
-    const backoffResult = BackoffCalculator.calculate({
-      nonReadyCount,
-      rateLimitSpeed,
-      baseBackoffMs: this.config.congestion.baseBackoffMs,
-      maxBackoffMs: this.config.congestion.maxBackoffMs,
-    });
+    const lastBackoffMs = parseInt(stats.lastBackoffMs ?? '0', 10);
 
     return {
       groupId,
       nonReadyCount,
       rateLimitSpeed,
-      currentBackoffMs: backoffResult.backoffMs,
-      congestionLevel: backoffResult.congestionLevel,
-      totalThrottleCount: parseInt(stats.totalThrottleCount ?? '0', 10),
-      lastThrottleAt: parseInt(stats.lastThrottleAt ?? '0', 10),
-      avgThrottlePerJob: parseFloat(stats.avgThrottlePerJob ?? '0'),
+      lastBackoffMs,
+      congestionLevel: BackoffCalculator.classify(
+        lastBackoffMs,
+        this.config.congestion.baseBackoffMs,
+      ),
     };
   }
 
-  /**
-   * 전체 시스템의 혼잡 상태 요약을 반환한다.
-   */
   async getSystemCongestionSummary(): Promise<SystemCongestionSummary> {
-    const activeGroups = await this.redis.smembers('active-groups');
-    const states = await Promise.all(
-      activeGroups.map((groupId) => this.getCongestionState(groupId)),
+    const groupIds = await this.redisService.set.members(
+      this.keys.activeGroups(),
     );
 
-    const totalNonReady = states.reduce((sum, s) => sum + s.nonReadyCount, 0);
-    const maxCongestion = states.reduce(
-      (max, s) => (s.currentBackoffMs > max.currentBackoffMs ? s : max),
-      states[0] ?? { congestionLevel: CongestionLevel.NONE, currentBackoffMs: 0 },
+    const groups = await Promise.all(
+      groupIds.map(async (groupId) => this.getCongestionState(groupId)),
+    );
+
+    const totalNonReadyCount = groups.reduce(
+      (sum, g) => sum + g.nonReadyCount,
+      0,
     );
 
     return {
-      activeGroupCount: activeGroups.length,
-      totalNonReadyCount: totalNonReady,
-      worstCongestionLevel: maxCongestion?.congestionLevel ?? CongestionLevel.NONE,
-      worstCongestionGroupId: (maxCongestion as GroupCongestionState)?.groupId ?? '',
-      groupStates: states,
+      totalNonReadyCount,
+      activeGroupCount: groupIds.length,
+      groups,
     };
   }
 
-  /**
-   * 그룹의 혼잡 통계를 초기화한다.
-   * 그룹의 모든 작업이 완료되었을 때 호출한다.
-   */
   async resetGroupStats(groupId: string): Promise<void> {
-    const countKey = `congestion:${groupId}:non-ready-count`;
-    const statsKey = `congestion:${groupId}:stats`;
-
-    await Promise.all([
-      this.redis.del(countKey),
-      this.redis.del(statsKey),
-    ]);
+    await this.redisService.delete(
+      this.keys.congestionNonReadyCount(groupId),
+      this.keys.congestionStats(groupId),
+    );
   }
 
-  // --- Private helpers ---
-
-  /**
-   * 혼잡 제어 비활성화 시 고정 backoff로 폴백한다.
-   */
-  private async addWithFixedBackoff(jobId: string, groupId: string): Promise<BackoffResult> {
+  private async fixedBackoff(
+    jobId: string,
+    groupId: string,
+  ): Promise<BackoffResult> {
     const backoffMs = this.config.congestion.baseBackoffMs;
     const executeAt = Date.now() + backoffMs;
 
-    await this.redis.zadd('non-ready-queue', executeAt.toString(), jobId);
+    await this.redisService.sortedSet.add(
+      this.keys.nonReadyQueue(),
+      executeAt,
+      jobId,
+    );
+
+    this.logger.debug(
+      `Job ${jobId} -> Non-ready fixed backoff (group=${groupId}, backoff=${backoffMs}ms)`,
+    );
 
     return {
       backoffMs,
-      estimatedWaitSec: backoffMs / 1000,
+      nonReadyCount: 0,
+      rateLimitSpeed: 0,
       congestionLevel: CongestionLevel.NONE,
     };
   }
-
-  private logCongestionState(
-    groupId: string,
-    result: BackoffResult,
-    nonReadyCount: number,
-    rateLimitSpeed: number,
-  ): void {
-    const level = result.congestionLevel;
-
-    if (level === CongestionLevel.CRITICAL) {
-      this.logger.warn(
-        `CRITICAL congestion: group=${groupId}, ` +
-        `backoff=${result.backoffMs}ms, ` +
-        `nonReady=${nonReadyCount}, speed=${rateLimitSpeed} RPS`,
-      );
-    } else if (level === CongestionLevel.HIGH) {
-      this.logger.warn(
-        `HIGH congestion: group=${groupId}, ` +
-        `backoff=${result.backoffMs}ms, nonReady=${nonReadyCount}`,
-      );
-    } else if (level !== CongestionLevel.NONE) {
-      this.logger.debug(
-        `Congestion ${level}: group=${groupId}, backoff=${result.backoffMs}ms`,
-      );
-    }
-  }
-}
-
-export interface GroupCongestionState {
-  groupId: string;
-  nonReadyCount: number;
-  rateLimitSpeed: number;
-  currentBackoffMs: number;
-  congestionLevel: CongestionLevel;
-  totalThrottleCount: number;
-  lastThrottleAt: number;
-  avgThrottlePerJob: number;
-}
-
-export interface SystemCongestionSummary {
-  activeGroupCount: number;
-  totalNonReadyCount: number;
-  worstCongestionLevel: CongestionLevel;
-  worstCongestionGroupId: string;
-  groupStates: GroupCongestionState[];
 }
 ```
 
+> **구현 변경 사항:**
+> - DI: `ioredis` 직접 주입 대신 `RedisService` 래퍼 + `RedisKeyBuilder` 사용. 키를 하드코딩하지 않고 `keys.*()` 메서드로 생성.
+> - `Lua 호출`: `(redis as any).congestion_backoff()` 대신 `redisService.callCommand('congestionBackoff', KEYS, ARGV)` 패턴.
+> - `GroupCongestionState`: `currentBackoffMs` → `lastBackoffMs`, `totalThrottleCount`/`lastThrottleAt`/`avgThrottlePerJob` 필드 제거 (stats Hash에서 직접 관리).
+> - `SystemCongestionSummary`: `worstCongestionLevel`/`worstCongestionGroupId` 제거, `groups` 배열로 단순화.
+> - `fixedBackoff()`: 반환값에 `nonReadyCount: 0`, `rateLimitSpeed: 0` 추가 (BackoffResult 인터페이스 변경 반영).
+> - `logCongestionState()` 제거: 단일 `logger.debug()` 호출로 대체.
+
 ### Congestion Stats Service
 
-**`congestion/congestion-stats.service.ts`**
+**`congestion/CongestionStatsService.ts`**
 
 ```typescript
-import { Injectable, Inject, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
+import { Injectable, Inject } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
 
-/**
- * 혼잡 통계를 수집하고 작업당 평균 쓰로틀링 횟수를 추적한다.
- * 모니터링 및 알림에 사용한다.
- */
+export interface CongestionSnapshot {
+  nonReadyCount: number;
+  rateLimitSpeed: number;
+  backoffMs: number;
+  timestamp: number;
+}
+
 @Injectable()
 export class CongestionStatsService {
-  private readonly logger = new Logger(CongestionStatsService.name);
+  private readonly maxHistoryLength: number;
 
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
-  ) {}
-
-  /**
-   * 작업 완료 시 해당 그룹의 평균 쓰로틀링 횟수를 갱신한다.
-   */
-  async recordJobCompletion(groupId: string, throttleCount: number): Promise<void> {
-    const statsKey = `congestion:${groupId}:stats`;
-    const completionCountKey = `congestion:${groupId}:completed-count`;
-
-    const completedCount = await this.redis.incr(completionCountKey);
-    const totalThrottles = await this.redis.hget(statsKey, 'totalThrottleCount');
-
-    if (totalThrottles) {
-      const avg = parseInt(totalThrottles, 10) / completedCount;
-      await this.redis.hset(statsKey, 'avgThrottlePerJob', avg.toFixed(2));
-    }
-  }
-
-  /**
-   * 혼잡도 히스토리를 기록한다 (시계열 데이터).
-   * 외부 모니터링 시스템(Prometheus 등)으로 export할 때 사용한다.
-   */
-  async snapshotCongestion(groupId: string, snapshot: {
-    nonReadyCount: number;
-    backoffMs: number;
-    rateLimitSpeed: number;
-  }): Promise<void> {
-    const timeSeriesKey = `congestion:${groupId}:history`;
-    const entry = JSON.stringify({
-      timestamp: Date.now(),
-      ...snapshot,
-    });
-
-    await this.redis.rpush(timeSeriesKey, entry);
-    // ⚠️ LTRIM은 개수(index) 기반이므로, 시간 기반 statsRetentionMs를 직접 사용할 수 없다.
-    // snapshotCongestion()의 호출 주기(snapshotIntervalMs)를 알아야 보관 개수를 계산할 수 있다.
-    //
-    // 보관 개수 = statsRetentionMs / snapshotIntervalMs
-    // 예: statsRetentionMs=3,600,000(1시간), snapshotIntervalMs=10,000(10초) → 360개 보관
-    //
-    // 기존 코드 `statsRetentionMs / 1000`은 호출 주기가 정확히 1초일 때만 맞으므로,
-    // 설정에 snapshotIntervalMs를 추가하거나, 고정 maxEntries를 사용하는 것이 정확하다.
-    const snapshotIntervalMs = 10_000; // 기본 snapshot 주기 10초 (config로 분리 권장)
-    const maxEntries = Math.ceil(this.config.congestion.statsRetentionMs / snapshotIntervalMs);
-    await this.redis.ltrim(
-      timeSeriesKey,
-      -maxEntries,
-      -1,
+    private readonly keys: RedisKeyBuilder,
+  ) {
+    this.maxHistoryLength = Math.floor(
+      this.config.congestion.statsRetentionMs / 1000,
     );
   }
 
   /**
-   * 혼잡도 히스토리를 조회한다.
+   * 작업 완료 시 해당 그룹의 평균 쓰로틀링 횟수를 갱신한다.
+   * 증분 평균(incremental mean) 공식: newAvg = prevAvg + (throttleCount - prevAvg) / completed
    */
+  async recordJobCompletion(
+    groupId: string,
+    throttleCount: number,
+  ): Promise<void> {
+    const completedKey = this.keys.congestionCompletedCount(groupId);
+    const statsKey = this.keys.congestionStats(groupId);
+
+    await this.redisService.string.increment(completedKey);
+
+    const completedRaw = await this.redisService.string.get(completedKey);
+    const completed = parseInt(completedRaw ?? '1', 10);
+    const prevAvgRaw = await this.redisService.hash.get(
+      statsKey,
+      'avgThrottlePerJob',
+    );
+    const prevAvg = parseFloat(prevAvgRaw ?? '0');
+
+    const newAvg = prevAvg + (throttleCount - prevAvg) / completed;
+    await this.redisService.hash.set(
+      statsKey,
+      'avgThrottlePerJob',
+      newAvg.toFixed(2),
+    );
+  }
+
+  async snapshotCongestion(
+    groupId: string,
+    snapshot: CongestionSnapshot,
+  ): Promise<void> {
+    const historyKey = this.keys.congestionHistory(groupId);
+
+    await this.redisService.list.append(historyKey, JSON.stringify(snapshot));
+    await this.redisService.list.trim(historyKey, -this.maxHistoryLength, -1);
+  }
+
   async getCongestionHistory(
     groupId: string,
-    limit: number = 100,
+    limit: number,
   ): Promise<CongestionSnapshot[]> {
-    const timeSeriesKey = `congestion:${groupId}:history`;
-    const entries = await this.redis.lrange(timeSeriesKey, -limit, -1);
-    return entries.map((e) => JSON.parse(e));
+    const historyKey = this.keys.congestionHistory(groupId);
+    const entries = await this.redisService.list.range(historyKey, -limit, -1);
+
+    return entries.map((entry) => JSON.parse(entry) as CongestionSnapshot);
   }
 }
-
-export interface CongestionSnapshot {
-  timestamp: number;
-  nonReadyCount: number;
-  backoffMs: number;
-  rateLimitSpeed: number;
-}
 ```
+
+> **구현 변경 사항:**
+> - DI: `ioredis` 직접 주입 대신 `RedisService` + `RedisKeyBuilder` 사용.
+> - `Logger` 제거: 현재 구현에서 로깅 없음.
+> - `recordJobCompletion()`: 단순 나눗셈(`totalThrottles / completed`) 대신 증분 평균 공식 사용 — `totalThrottleCount` Hash 필드에 의존하지 않음.
+> - `snapshotCongestion()`: snapshot 파라미터가 `CongestionSnapshot` 인터페이스로 타입 명시. `maxHistoryLength`를 constructor에서 사전 계산.
+> - `getCongestionHistory()`: `limit` 파라미터의 기본값 제거 (호출자가 명시).
 
 ---
 
@@ -915,130 +882,207 @@ private calculateBackoff(groupId: string): number {
 **변경 후 (Step 3):**
 
 ```typescript
-import { CongestionControlService } from '../congestion/congestion-control.service';
+import { Injectable } from '@nestjs/common';
+import { RateLimiterService } from './RateLimiterService';
+import { ReadyQueueService } from './ReadyQueueService';
+import { CongestionControlService } from '../congestion/CongestionControlService';
+import { Job } from '../model/Job';
+
+export interface BackpressureResult {
+  accepted: boolean;
+  destination: 'ready' | 'non-ready' | 'rejected';
+  reason?: string;
+}
 
 @Injectable()
 export class BackpressureService {
   constructor(
     private readonly rateLimiter: RateLimiterService,
     private readonly readyQueue: ReadyQueueService,
-    private readonly nonReadyQueue: NonReadyQueueService,
-    private readonly congestionControl: CongestionControlService,  // 추가
+    private readonly congestionControl: CongestionControlService,
   ) {}
 
   async admit(job: Job): Promise<BackpressureResult> {
     const hasCapacity = await this.readyQueue.hasCapacity();
+
     if (!hasCapacity) {
-      return { accepted: false, destination: 'rejected', reason: 'Ready Queue at capacity' };
+      return {
+        accepted: false,
+        destination: 'rejected',
+        reason: 'Ready Queue at capacity',
+      };
     }
 
     const rateLimitResult = await this.rateLimiter.checkRateLimit(job.groupId);
 
     if (rateLimitResult.allowed) {
       const pushed = await this.readyQueue.push(job.id);
+
       if (!pushed) {
-        return { accepted: false, destination: 'rejected', reason: 'Ready Queue became full' };
+        return {
+          accepted: false,
+          destination: 'rejected',
+          reason: 'Ready Queue became full',
+        };
       }
+
       return { accepted: true, destination: 'ready' };
     }
 
     // ★ 변경: 고정 backoff → 동적 backoff (혼잡 제어)
-    const backoffResult = await this.congestionControl.addToNonReady(job.id, job.groupId);
+    const backoffResult = await this.congestionControl.addToNonReady(
+      job.id,
+      job.groupId,
+    );
 
     return {
       accepted: true,
       destination: 'non-ready',
-      reason: `Rate limited, congestion=${backoffResult.congestionLevel}, ` +
-              `backoff=${backoffResult.backoffMs}ms`,
+      reason:
+        `Rate limited (global: ${rateLimitResult.globalCount}/${rateLimitResult.globalLimit}, ` +
+        `group: ${rateLimitResult.groupCount}/${rateLimitResult.perGroupLimit}, ` +
+        `congestion: ${backoffResult.congestionLevel})`,
     };
   }
 
-  async requeue(jobId: string, groupId: string, retryCount: number): Promise<void> {
-    // 처리 실패 시에도 혼잡 제어 적용
+  async requeue(
+    jobId: string,
+    groupId: string,
+    _retryCount: number,
+  ): Promise<void> {
     await this.congestionControl.addToNonReady(jobId, groupId);
   }
 }
 ```
 
+> **구현 변경 사항:**
+> - `NonReadyQueueService` 의존 제거: `CongestionControlService`가 Non-ready Queue ZADD를 내부 처리하므로 불필요.
+> - `reason` 문자열: Rate Limit 상세 정보 (`globalCount/globalLimit`, `groupCount/perGroupLimit`) 포함.
+> - `requeue()`: `retryCount` → `_retryCount` (현재 미사용, 향후 지수 backoff 확장 여지).
+
 ### 변경 지점: DispatcherService
 
-Dispatcher가 Non-ready → Ready 이동 후 혼잡 카운트를 감소시킨다.
+Dispatcher가 Non-ready → Ready 이동 시 **`move-to-ready.lua` 내부에서 congestion 카운터를 원자적으로 감소**시킨다.
+`CongestionControlService`를 직접 주입하지 않으며, Lua 스크립트에 `prefix`를 전달하여 congestion 키에 접근한다.
 
 ```typescript
 @Injectable()
-export class DispatcherService implements OnModuleInit, OnModuleDestroy {
+export class DispatcherService implements OnModuleDestroy {
+  private readonly logger = new Logger(DispatcherService.name);
+  private state: DispatcherState = DispatcherState.IDLE;
+  private intervalHandle: ReturnType<typeof setInterval> | null = null;
+  private isRunning = false;
+
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly keys: RedisKeyBuilder,
     private readonly readyQueue: ReadyQueueService,
-    private readonly nonReadyQueue: NonReadyQueueService,
-    private readonly congestionControl: CongestionControlService,  // 추가
   ) {}
 
-  private async dispatch(): Promise<void> {
-    if (this.isRunning) return;
+  // ... start(), stop(), getState(), getStats() 생략
+
+  private async dispatch(): Promise<number> {
+    if (this.isRunning) {
+      return 0;
+    }
     this.isRunning = true;
 
     try {
       const hasCapacity = await this.readyQueue.hasCapacity();
-      if (!hasCapacity) return;
+
+      if (!hasCapacity) {
+        this.logger.debug('Ready Queue full, skipping dispatch');
+
+        return 0;
+      }
 
       const moved = await this.moveToReady();
 
       if (moved > 0) {
-        // ★ 추가: 이동된 작업에 대해 혼잡 카운트 감소
-        // 그룹별로 카운트를 감소시켜야 하므로, 이동된 작업의 groupId를 알아야 함
-        // 실제 구현에서는 jobId에서 groupId를 추출하거나 별도 매핑 사용
-        await this.updateCongestionCounters(moved);
-
-        this.logger.debug(`Dispatched ${moved} jobs, updated congestion counters`);
+        this.logger.debug(
+          `Dispatched ${moved} jobs from Non-ready -> Ready Queue`,
+        );
       }
+
+      return moved;
     } catch (error) {
-      this.logger.error(`Dispatch failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `Dispatch failed: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+
+      return 0;
     } finally {
       this.isRunning = false;
     }
   }
 
   /**
-   * ⚠️ 권장 구현: 방법 3 — move_to_ready Lua 스크립트 내에서 카운트 갱신
-   *
-   * 방법 1 (jobId 접두사): jobId 형식에 의존하므로 Step 1 Fair Queue와 규약이 필요하다.
-   * 방법 2 (별도 Hash 매핑): 추가 Redis 키가 필요하고, 매핑 등록/삭제 누락 시 메모리 누수.
-   * 방법 3 (Lua 스크립트): move_to_ready.lua가 ZREM 시 congestion 카운트도 함께 갱신하면
-   *   원자적이고, 별도 매핑 없이 HGET으로 groupId를 조회할 수 있다.
-   *
-   * 이를 위해 Step 1의 enqueue.lua에서 job metadata Hash에 groupId를 저장해 두어야 한다.
-   * (Step 1에서 HSET bulk-action:job:{jobId} groupId {groupId} 로 이미 저장됨)
-   *
-   * move_to_ready.lua 확장:
-   * ```lua
-   * for _, jobId in ipairs(jobs) do
-   *   redis.call('ZREM', KEYS[1], jobId)
-   *   redis.call('RPUSH', KEYS[2], jobId)
-   *   -- groupId 조회 후 congestion 카운트 감소
-   *   local groupId = redis.call('HGET', 'bulk-action:job:' .. jobId, 'groupId')
-   *   if groupId then
-   *     local countKey = 'bulk-action:congestion:' .. groupId .. ':non-ready-count'
-   *     local newCount = redis.call('DECR', countKey)
-   *     if newCount < 0 then redis.call('SET', countKey, '0') end
-   *   end
-   * end
-   * ```
+   * move-to-ready.lua에 prefix를 ARGV[3]로 전달하여,
+   * Lua 내부에서 job metadata Hash → groupId 조회 → congestion 카운터 DECR을
+   * 원자적으로 처리한다.
    */
-  private async updateCongestionCounters(movedCount: number): Promise<void> {
-    // move_to_ready.lua 내부에서 원자적으로 처리되므로,
-    // 별도 호출이 필요 없다. 아래는 Lua 미적용 시의 폴백 구현.
-    // 실제 운영에서는 Lua 스크립트 방식을 사용하고 이 메서드를 제거한다.
-    this.logger.warn(
-      `updateCongestionCounters called with movedCount=${movedCount}. ` +
-      `move_to_ready.lua에서 원자적 처리를 권장한다.`,
+  private async moveToReady(): Promise<number> {
+    const result = await this.redisService.callCommand(
+      'moveToReady',
+      [this.keys.nonReadyQueue(), this.keys.readyQueue()],
+      [
+        Date.now().toString(),
+        this.config.backpressure.dispatchBatchSize.toString(),
+        this.keys.getPrefix(),  // ★ congestion 카운터 감소에 사용
+      ],
     );
-  }
 
-  // ...
+    return result as number;
+  }
 }
 ```
+
+#### move-to-ready.lua (congestion 카운터 감소 통합)
+
+```lua
+-- KEYS[1]: non-ready queue (Sorted Set)
+-- KEYS[2]: ready queue (List)
+-- ARGV[1]: current time (epoch ms)
+-- ARGV[2]: max batch size
+-- ARGV[3]: key prefix (optional, for congestion counter decrement)
+
+local jobs = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, tonumber(ARGV[2]))
+
+if #jobs == 0 then
+  return 0
+end
+
+local prefix = ARGV[3]
+
+for _, jobId in ipairs(jobs) do
+  redis.call('ZREM', KEYS[1], jobId)
+  redis.call('RPUSH', KEYS[2], jobId)
+
+  if prefix then
+    local jobKey = prefix .. 'job:' .. jobId
+    local groupId = redis.call('HGET', jobKey, 'groupId')
+    if groupId then
+      local countKey = prefix .. 'congestion:' .. groupId .. ':non-ready-count'
+      local newCount = redis.call('DECR', countKey)
+      if newCount < 0 then
+        redis.call('SET', countKey, '0')
+      end
+      local statsKey = prefix .. 'congestion:' .. groupId .. ':stats'
+      redis.call('HSET', statsKey, 'currentNonReadyCount', tostring(math.max(0, newCount)))
+    end
+  end
+end
+
+return #jobs
+```
+
+> **구현 결정 사항:**
+> - 문서 초안에서 "권장 방법 3 (Lua 스크립트 내 처리)"로 제안했던 것이 실제로 채택됨.
+> - `CongestionControlService` 직접 주입 제거: Dispatcher는 `RedisService`, `RedisKeyBuilder`, `ReadyQueueService`만 의존.
+> - `updateCongestionCounters()` 메서드 제거: Lua 내부에서 원자적 처리.
+> - `prefix`가 있을 때만 congestion 카운터를 갱신하므로, congestion 모듈 미사용 시에도 안전.
 
 ### 전체 데이터 흐름 (Step 1 + 2 + 3)
 
@@ -1063,12 +1107,15 @@ export class DispatcherService implements OnModuleInit, OnModuleDestroy {
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│ Dispatcher (주기적 실행)                                         │
+│ Dispatcher (주기적 실행) — move-to-ready.lua                      │
 │                                                                 │
 │ 1. Non-ready Queue에서 score <= now 작업 조회                     │
-│ 2. Ready Queue로 이동                                            │
-│ 3. congestionControl.releaseFromNonReady() ← Step 3 ★           │
-│    → Non-ready 카운트 감소                                       │
+│ 2. Ready Queue로 이동 (ZREM + RPUSH)                             │
+│ 3. prefix가 있으면 Lua 내부에서:                  ← Step 3 ★      │
+│    ├── HGET {prefix}job:{jobId} groupId                         │
+│    ├── DECR {prefix}congestion:{groupId}:non-ready-count        │
+│    └── HSET stats currentNonReadyCount 동기화                    │
+│    → 원자적으로 congestion 카운터 감소                              │
 │    → 이후 같은 그룹 작업의 backoff가 자동으로 줄어듦                  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -1149,98 +1196,134 @@ export class DispatcherService implements OnModuleInit, OnModuleDestroy {
 
 ### BackoffCalculator 단위 테스트
 
+**`test/congestion/BackoffCalculator.spec.ts`**
+
 ```typescript
+import {
+  BackoffCalculator,
+  CongestionLevel,
+} from '@app/bulk-action/congestion/BackoffCalculator';
+
 describe('BackoffCalculator', () => {
-  const baseBackoffMs = 1000;
-  const maxBackoffMs = 120000;
+  describe('calculate', () => {
+    it('첫 번째 작업은 base backoff를 반환한다', () => {
+      // given
+      const params = {
+        nonReadyCount: 1,
+        rateLimitSpeed: 10,
+        baseBackoffMs: 1000,
+        maxBackoffMs: 120000,
+      };
 
-  it('Non-ready 작업이 없으면 기본 backoff를 반환한다', () => {
-    const result = BackoffCalculator.calculate({
-      nonReadyCount: 0,
-      rateLimitSpeed: 100,
-      baseBackoffMs,
-      maxBackoffMs,
+      // when
+      const result = BackoffCalculator.calculate(params);
+
+      // then
+      expect(result.backoffMs).toBe(1000);
+      expect(result.congestionLevel).toBe(CongestionLevel.NONE);
     });
-    expect(result.backoffMs).toBe(1000);
-    expect(result.congestionLevel).toBe(CongestionLevel.NONE);
+
+    it('non-ready 수에 비례하여 backoff가 증가한다', () => {
+      // given - nonReadyCount=20, rateLimitSpeed=10
+      // backoff = 1000 + floor(20/10) * 1000 = 3000ms
+      const params = {
+        nonReadyCount: 20,
+        rateLimitSpeed: 10,
+        baseBackoffMs: 1000,
+        maxBackoffMs: 120000,
+      };
+
+      // when
+      const result = BackoffCalculator.calculate(params);
+
+      // then
+      expect(result.backoffMs).toBe(3000);
+    });
+
+    it('maxBackoffMs로 클램핑된다', () => {
+      // given
+      const params = {
+        nonReadyCount: 10000,
+        rateLimitSpeed: 1,
+        baseBackoffMs: 1000,
+        maxBackoffMs: 120000,
+      };
+
+      // when
+      const result = BackoffCalculator.calculate(params);
+
+      // then
+      expect(result.backoffMs).toBe(120000);
+    });
+
+    it('rateLimitSpeed가 0이면 1로 보정된다', () => {
+      // given
+      const params = {
+        nonReadyCount: 5,
+        rateLimitSpeed: 0,
+        baseBackoffMs: 1000,
+        maxBackoffMs: 120000,
+      };
+
+      // when
+      const result = BackoffCalculator.calculate(params);
+
+      // then
+      expect(result.rateLimitSpeed).toBe(1);
+      expect(result.backoffMs).toBe(6000);
+    });
   });
 
-  it('Non-ready 작업 수에 비례하여 backoff가 증가한다', () => {
-    const result = BackoffCalculator.calculate({
-      nonReadyCount: 500,
-      rateLimitSpeed: 100,
-      baseBackoffMs,
-      maxBackoffMs,
-    });
-    // 1000 + floor(500/100) * 1000 = 1000 + 5000 = 6000
-    expect(result.backoffMs).toBe(6000);
-    expect(result.congestionLevel).toBe(CongestionLevel.MODERATE);
-  });
+  describe('classify', () => {
+    it.each([
+      { backoffMs: 1000, baseBackoffMs: 1000, expected: CongestionLevel.NONE },
+      { backoffMs: 2000, baseBackoffMs: 1000, expected: CongestionLevel.LOW },
+      { backoffMs: 2999, baseBackoffMs: 1000, expected: CongestionLevel.LOW },
+      { backoffMs: 3000, baseBackoffMs: 1000, expected: CongestionLevel.MODERATE },
+      { backoffMs: 9999, baseBackoffMs: 1000, expected: CongestionLevel.MODERATE },
+      { backoffMs: 10000, baseBackoffMs: 1000, expected: CongestionLevel.HIGH },
+      { backoffMs: 29999, baseBackoffMs: 1000, expected: CongestionLevel.HIGH },
+      { backoffMs: 30000, baseBackoffMs: 1000, expected: CongestionLevel.CRITICAL },
+      { backoffMs: 120000, baseBackoffMs: 1000, expected: CongestionLevel.CRITICAL },
+    ])(
+      'backoff=$backoffMs, base=$baseBackoffMs → $expected',
+      ({ backoffMs, baseBackoffMs, expected }) => {
+        // when
+        const result = BackoffCalculator.classify(backoffMs, baseBackoffMs);
 
-  it('maxBackoffMs를 초과하지 않는다', () => {
-    const result = BackoffCalculator.calculate({
-      nonReadyCount: 1000000,
-      rateLimitSpeed: 10,
-      baseBackoffMs,
-      maxBackoffMs,
-    });
-    expect(result.backoffMs).toBe(maxBackoffMs);
-    expect(result.congestionLevel).toBe(CongestionLevel.CRITICAL);
-  });
-
-  it('rateLimitSpeed가 0이면 안전하게 처리한다', () => {
-    const result = BackoffCalculator.calculate({
-      nonReadyCount: 100,
-      rateLimitSpeed: 0,
-      baseBackoffMs,
-      maxBackoffMs,
-    });
-    // rateLimitSpeed = max(1, 0) = 1
-    // 1000 + floor(100/1) * 1000 = 101000
-    expect(result.backoffMs).toBe(101000);
-  });
-
-  it('Non-ready 작업이 rateLimitSpeed 미만이면 추가 backoff가 없다', () => {
-    const result = BackoffCalculator.calculate({
-      nonReadyCount: 50,
-      rateLimitSpeed: 100,
-      baseBackoffMs,
-      maxBackoffMs,
-    });
-    // floor(50/100) = 0 → 추가 backoff 없음
-    expect(result.backoffMs).toBe(1000);
-  });
-
-  describe('혼잡도 분류', () => {
-    const cases: Array<{ nonReady: number; speed: number; expected: CongestionLevel }> = [
-      { nonReady: 0, speed: 100, expected: CongestionLevel.NONE },
-      { nonReady: 150, speed: 100, expected: CongestionLevel.LOW },       // 2s → ratio 2
-      { nonReady: 500, speed: 100, expected: CongestionLevel.MODERATE },  // 6s → ratio 6
-      { nonReady: 2000, speed: 100, expected: CongestionLevel.HIGH },     // 21s → ratio 21
-      { nonReady: 5000, speed: 100, expected: CongestionLevel.CRITICAL }, // 51s → ratio 51
-    ];
-
-    test.each(cases)(
-      'nonReady=$nonReady, speed=$speed → $expected',
-      ({ nonReady, speed, expected }) => {
-        const result = BackoffCalculator.calculate({
-          nonReadyCount: nonReady,
-          rateLimitSpeed: speed,
-          baseBackoffMs,
-          maxBackoffMs,
-        });
-        expect(result.congestionLevel).toBe(expected);
+        // then
+        expect(result).toBe(expected);
       },
     );
+
+    it('baseBackoffMs가 0이면 NONE을 반환한다', () => {
+      // when
+      const result = BackoffCalculator.classify(5000, 0);
+
+      // then
+      expect(result).toBe(CongestionLevel.NONE);
+    });
   });
 
-  describe('예상 완료 시간', () => {
-    it('대기 작업 수와 처리 속도로 완료 시각을 계산한다', () => {
-      const result = BackoffCalculator.estimateCompletionTime({
-        totalPending: 1000,
-        rateLimitSpeed: 100,
-      });
-      expect(result.estimatedSeconds).toBe(10);
+  describe('estimateCompletionTime', () => {
+    it('대기 중인 작업 수와 처리 속도로 완료 시간을 추정한다', () => {
+      // given - 100개 대기, 속도 10/s
+      // when
+      const result = BackoffCalculator.estimateCompletionTime(100, 10);
+
+      // then - ceil(100/10) * 1000 = 10000ms
+      expect(result).toBe(10000);
+    });
+
+    it('rateLimitSpeed가 0이면 1로 보정된다', () => {
+      const result = BackoffCalculator.estimateCompletionTime(5, 0);
+      expect(result).toBe(5000);
+    });
+
+    it('나누어 떨어지지 않으면 올림한다', () => {
+      // ceil(15/10) * 1000 = 2000
+      const result = BackoffCalculator.estimateCompletionTime(15, 10);
+      expect(result).toBe(2000);
     });
   });
 });
@@ -1248,146 +1331,252 @@ describe('BackoffCalculator', () => {
 
 ### CongestionControlService 통합 테스트
 
+**`test/congestion/CongestionControlService.spec.ts`**
+
+실제 Redis를 사용하는 통합 테스트. `beforeEach`에서 `flushDatabase` 후 `active-groups`에 테스트 그룹을 등록한다.
+
 ```typescript
-describe('CongestionControlService (Integration)', () => {
-  let congestion: CongestionControlService;
-  let redis: Redis;
+import { Test, TestingModule } from '@nestjs/testing';
+import { Configuration } from '@app/config/Configuration';
+import { RedisModule } from '@app/redis/RedisModule';
+import { RedisService } from '@app/redis/RedisService';
+import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
+import { LuaScriptLoader } from '@app/bulk-action/lua/LuaScriptLoader';
+import {
+  BULK_ACTION_CONFIG,
+  BulkActionConfig,
+  DEFAULT_BACKPRESSURE_CONFIG,
+  DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_WORKER_POOL_CONFIG,
+} from '@app/bulk-action/config/BulkActionConfig';
+import { CongestionControlService } from '@app/bulk-action/congestion/CongestionControlService';
+import { CongestionLevel } from '@app/bulk-action/congestion/BackoffCalculator';
+
+describe('CongestionControlService', () => {
+  let module: TestingModule;
+  let service: CongestionControlService;
+  let redisService: RedisService;
+  let keys: RedisKeyBuilder;
+
+  const KEY_PREFIX = 'test:';
+  const env = Configuration.getEnv();
+
+  const config: BulkActionConfig = {
+    redis: {
+      host: env.redis.host,
+      port: env.redis.port,
+      password: env.redis.password,
+      db: env.redis.db,
+      keyPrefix: KEY_PREFIX,
+    },
+    fairQueue: DEFAULT_FAIR_QUEUE_CONFIG,
+    backpressure: {
+      ...DEFAULT_BACKPRESSURE_CONFIG,
+      globalRps: 10,
+    },
+    congestion: {
+      enabled: true,
+      baseBackoffMs: 1000,
+      maxBackoffMs: 120000,
+      statsRetentionMs: 3600000,
+    },
+    workerPool: DEFAULT_WORKER_POOL_CONFIG,
+  };
 
   beforeAll(async () => {
-    const module = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       imports: [
-        BulkActionModule.register({
-          redis: { host: 'localhost', port: 6379, db: 15 },
-          backpressure: { globalRps: 100 },
-          congestion: { enabled: true, baseBackoffMs: 1000, maxBackoffMs: 60000 },
+        RedisModule.register({
+          host: config.redis.host,
+          port: config.redis.port,
+          password: config.redis.password,
+          db: config.redis.db,
         }),
+      ],
+      providers: [
+        { provide: BULK_ACTION_CONFIG, useValue: config },
+        RedisKeyBuilder,
+        LuaScriptLoader,
+        CongestionControlService,
       ],
     }).compile();
 
-    congestion = module.get(CongestionControlService);
-    redis = module.get(REDIS_CLIENT);
-
-    // active-groups에 테스트 그룹 등록
-    await redis.sadd('active-groups', 'customer-A');
+    await module.init();
+    service = module.get(CongestionControlService);
+    redisService = module.get(RedisService);
+    keys = module.get(RedisKeyBuilder);
   });
 
-  afterEach(async () => {
-    await redis.flushdb();
-    await redis.sadd('active-groups', 'customer-A');
+  beforeEach(async () => {
+    await redisService.flushDatabase();
+    await redisService.set.add(keys.activeGroups(), 'customer-A');
   });
 
-  it('첫 번째 작업은 기본 backoff를 받는다', async () => {
-    const result = await congestion.addToNonReady('job-001', 'customer-A');
-    expect(result.backoffMs).toBe(1000);
-    expect(result.congestionLevel).toBe('NONE');
+  afterAll(async () => {
+    await redisService.flushDatabase();
+    await module.close();
   });
 
-  it('Non-ready 작업이 쌓일수록 backoff가 증가한다', async () => {
-    // 200개 작업을 Non-ready Queue에 추가
-    for (let i = 0; i < 200; i++) {
-      await congestion.addToNonReady(`job-${i}`, 'customer-A');
-    }
+  describe('addToNonReady', () => {
+    it('첫 번째 작업은 base backoff를 받는다', async () => {
+      // when
+      const result = await service.addToNonReady('job-1', 'customer-A');
 
-    // 201번째 작업의 backoff
-    const result = await congestion.addToNonReady('job-200', 'customer-A');
+      // then
+      expect(result.backoffMs).toBe(1000);
+      expect(result.nonReadyCount).toBe(1);
+      expect(result.congestionLevel).toBe(CongestionLevel.NONE);
+    });
 
-    // nonReadyCount=201, rateLimitSpeed=100 (globalRps=100, 활성그룹=1)
-    // backoff = 1000 + floor(201/100) * 1000 = 1000 + 2000 = 3000
-    expect(result.backoffMs).toBe(3000);
+    it('작업이 쌓이면 backoff가 증가한다', async () => {
+      // given - 10개 작업 추가 (rateLimitSpeed = globalRps/1group = 10)
+      for (let i = 0; i < 10; i++) {
+        await service.addToNonReady(`job-${i}`, 'customer-A');
+      }
+
+      // when - 11번째
+      const result = await service.addToNonReady('job-10', 'customer-A');
+
+      // then - backoff = 1000 + floor(11/10) * 1000 = 2000
+      expect(result.backoffMs).toBe(2000);
+      expect(result.nonReadyCount).toBe(11);
+    });
+
+    it('여러 활성 그룹이 있으면 rateLimitSpeed가 줄어들어 backoff가 증가한다', async () => {
+      // given - 2개 그룹
+      await redisService.set.add(keys.activeGroups(), 'customer-B');
+
+      // rateLimitSpeed = floor(10/2) = 5
+      for (let i = 0; i < 5; i++) {
+        await service.addToNonReady(`job-${i}`, 'customer-A');
+      }
+
+      // when - 6번째
+      const result = await service.addToNonReady('job-5', 'customer-A');
+
+      // then - backoff = 1000 + floor(6/5) * 1000 = 2000
+      expect(result.backoffMs).toBe(2000);
+      expect(result.rateLimitSpeed).toBe(5);
+    });
   });
 
-  it('releaseFromNonReady가 카운트를 감소시킨다', async () => {
-    // 100개 추가
-    for (let i = 0; i < 100; i++) {
-      await congestion.addToNonReady(`job-${i}`, 'customer-A');
-    }
+  describe('releaseFromNonReady', () => {
+    it('카운터를 감소시킨다', async () => {
+      // given
+      await service.addToNonReady('job-1', 'customer-A');
+      await service.addToNonReady('job-2', 'customer-A');
+      await service.addToNonReady('job-3', 'customer-A');
 
-    // 50개 release
-    const remaining = await congestion.releaseFromNonReady('customer-A', 50);
-    expect(remaining).toBe(50);
+      // when
+      const newCount = await service.releaseFromNonReady('customer-A', 2);
 
-    // 다음 작업의 backoff가 줄어야 함
-    const result = await congestion.addToNonReady('job-100', 'customer-A');
-    // nonReadyCount=51, floor(51/100)=0 → backoff = 1000
-    expect(result.backoffMs).toBe(1000);
+      // then
+      expect(newCount).toBe(1);
+    });
+
+    it('카운터 감소 후 추가하면 backoff가 줄어든다', async () => {
+      // given - 20개 작업
+      for (let i = 0; i < 20; i++) {
+        await service.addToNonReady(`job-${i}`, 'customer-A');
+      }
+
+      // when - 10개 해제 후 추가
+      await service.releaseFromNonReady('customer-A', 10);
+      const result = await service.addToNonReady('job-20', 'customer-A');
+
+      // then - nonReadyCount = 10 + 1 = 11, backoff = 1000 + floor(11/10)*1000 = 2000
+      expect(result.nonReadyCount).toBe(11);
+      expect(result.backoffMs).toBe(2000);
+    });
   });
 
-  it('활성 그룹이 늘면 per-group speed가 줄어 backoff가 증가한다', async () => {
-    // 활성 그룹 5개 등록
-    await redis.sadd('active-groups', 'customer-B', 'customer-C', 'customer-D', 'customer-E');
+  describe('getCongestionState', () => {
+    it('그룹의 혼잡 상태를 조회한다', async () => {
+      // given
+      await service.addToNonReady('job-1', 'customer-A');
+      await service.addToNonReady('job-2', 'customer-A');
 
-    // 100개 작업 추가
-    for (let i = 0; i < 100; i++) {
-      await congestion.addToNonReady(`job-${i}`, 'customer-A');
-    }
+      // when
+      const state = await service.getCongestionState('customer-A');
 
-    const result = await congestion.addToNonReady('job-100', 'customer-A');
-    // rateLimitSpeed = floor(100/5) = 20
-    // nonReadyCount=101, floor(101/20)=5 → backoff = 1000 + 5000 = 6000
-    expect(result.backoffMs).toBe(6000);
+      // then
+      expect(state.groupId).toBe('customer-A');
+      expect(state.nonReadyCount).toBe(2);
+      expect(state.rateLimitSpeed).toBe(10);
+      expect(state.lastBackoffMs).toBe(1000);
+    });
   });
 
-  it('getCongestionState가 올바른 상태를 반환한다', async () => {
-    for (let i = 0; i < 50; i++) {
-      await congestion.addToNonReady(`job-${i}`, 'customer-A');
-    }
+  describe('getSystemCongestionSummary', () => {
+    it('전체 시스템 혼잡 요약을 반환한다', async () => {
+      // given
+      await redisService.set.add(keys.activeGroups(), 'customer-B');
+      await service.addToNonReady('job-A1', 'customer-A');
+      await service.addToNonReady('job-B1', 'customer-B');
 
-    const state = await congestion.getCongestionState('customer-A');
-    expect(state.groupId).toBe('customer-A');
-    expect(state.nonReadyCount).toBe(50);
-    expect(state.rateLimitSpeed).toBe(100); // globalRps=100, 활성그룹=1
-    expect(state.totalThrottleCount).toBe(50);
+      // when
+      const summary = await service.getSystemCongestionSummary();
+
+      // then
+      expect(summary.activeGroupCount).toBe(2);
+      expect(summary.totalNonReadyCount).toBe(2);
+      expect(summary.groups).toHaveLength(2);
+    });
   });
 
-  it('resetGroupStats가 모든 통계를 초기화한다', async () => {
-    for (let i = 0; i < 10; i++) {
-      await congestion.addToNonReady(`job-${i}`, 'customer-A');
-    }
+  describe('resetGroupStats', () => {
+    it('그룹의 혼잡 통계를 초기화한다', async () => {
+      // given
+      await service.addToNonReady('job-1', 'customer-A');
+      await service.addToNonReady('job-2', 'customer-A');
 
-    await congestion.resetGroupStats('customer-A');
+      // when
+      await service.resetGroupStats('customer-A');
 
-    const state = await congestion.getCongestionState('customer-A');
-    expect(state.nonReadyCount).toBe(0);
-    expect(state.totalThrottleCount).toBe(0);
+      // then
+      const state = await service.getCongestionState('customer-A');
+      expect(state.nonReadyCount).toBe(0);
+      expect(state.lastBackoffMs).toBe(0);
+    });
   });
-});
-```
 
-### 공회전 감소 검증 테스트
+  describe('disabled mode', () => {
+    it('disabled일 때 고정 backoff로 폴백한다', async () => {
+      // given - disabled config로 새 모듈 생성
+      const disabledConfig: BulkActionConfig = {
+        ...config,
+        congestion: { ...config.congestion, enabled: false },
+      };
 
-```typescript
-describe('공회전 감소 검증', () => {
-  let congestion: CongestionControlService;
-  let readyQueue: ReadyQueueService;
-  let nonReadyQueue: NonReadyQueueService;
-  let redis: Redis;
+      const disabledModule = await Test.createTestingModule({
+        imports: [
+          RedisModule.register({
+            host: config.redis.host,
+            port: config.redis.port,
+            password: config.redis.password,
+            db: config.redis.db,
+          }),
+        ],
+        providers: [
+          { provide: BULK_ACTION_CONFIG, useValue: disabledConfig },
+          RedisKeyBuilder,
+          LuaScriptLoader,
+          CongestionControlService,
+        ],
+      }).compile();
 
-  // ... setup 생략
+      await disabledModule.init();
+      const disabledService = disabledModule.get(CongestionControlService);
 
-  it('동적 backoff가 공회전 횟수를 줄인다', async () => {
-    const totalJobs = 500;
-    const rps = 50;
-    let throttleCount = 0;
+      // when
+      const result = await disabledService.addToNonReady('job-1', 'customer-A');
 
-    // 시뮬레이션: 500개 작업, 50 RPS
-    // 1. 초기: 50개 Ready, 450개 Non-ready
-    const initialReady = Math.min(totalJobs, rps);
-    const initialNonReady = totalJobs - initialReady;
+      // then
+      expect(result.backoffMs).toBe(1000);
+      expect(result.congestionLevel).toBe(CongestionLevel.NONE);
 
-    for (let i = 0; i < initialNonReady; i++) {
-      await congestion.addToNonReady(`job-${i}`, 'customer-A');
-      throttleCount++;
-    }
-
-    // 2. 첫 번째 backoff 확인
-    const state = await congestion.getCongestionState('customer-A');
-    // backoff = 1000 + floor(450/50) * 1000 = 10초
-    // → 고정 backoff(1초)보다 9초 더 기다림 = 공회전 9회 절약
-
-    // 작업당 평균 쓰로틀링 기대치
-    const avgThrottlePerJob = throttleCount / totalJobs;
-    // 이론적으로 각 작업은 1~2회 쓰로틀링
-    expect(avgThrottlePerJob).toBeLessThan(2);
+      await disabledModule.close();
+    });
   });
 });
 ```
@@ -1574,5 +1763,61 @@ Step 4:   "실제로 작업을 꺼내서 실행하는" 실행 엔진
 ────────────────────────────────────────                                                                        
 #: 8                                                                                                            
 이슈: Lua 스크립트 ioredis keyPrefix 충돌 경고 누락                                                             
-적용 내용: keyPrefix 이중 접두사 문제 설명, 3가지 해결 방법, move_to_ready.lua 확장 시 주의 안내 추가             
+적용 내용: keyPrefix 이중 접두사 문제 설명, 3가지 해결 방법, move_to_ready.lua 확장 시 주의 안내 추가
+```
+
+#### 2. 2026-02-10 — 구현 코드 기반 전면 최신화
+```
+#: 9
+이슈: congestion-backoff.lua ARGV 순서 및 시각 산출 방식 불일치
+적용 내용: ARGV에서 groupId 제거, redis.call('TIME') → Date.now() ARGV 전달로 변경,
+stats Hash 필드를 currentNonReadyCount/lastBackoffMs/rateLimitSpeed/lastUpdatedMs로 갱신
+────────────────────────────────────────
+#: 10
+이슈: Lua 파일명 underscore vs kebab-case 불일치
+적용 내용: congestion_backoff.lua → congestion-backoff.lua, congestion_release.lua → congestion-release.lua
+────────────────────────────────────────
+#: 11
+이슈: BackoffResult 인터페이스 불일치 (estimatedWaitSec 존재, nonReadyCount/rateLimitSpeed 부재)
+적용 내용: estimatedWaitSec 제거, nonReadyCount/rateLimitSpeed 추가로 Lua 결과 직접 전달 구조 반영
+────────────────────────────────────────
+#: 12
+이슈: DI 의존성 (ioredis 직접 주입 vs RedisService + RedisKeyBuilder)
+적용 내용: 모든 서비스 코드를 RedisService + RedisKeyBuilder 기반으로 갱신
+────────────────────────────────────────
+#: 13
+이슈: GroupCongestionState/SystemCongestionSummary 인터페이스 불일치
+적용 내용: GroupCongestionState에서 totalThrottleCount/lastThrottleAt/avgThrottlePerJob 제거,
+currentBackoffMs → lastBackoffMs 변경. SystemCongestionSummary 단순화 (worst* 제거, groups 배열)
+────────────────────────────────────────
+#: 14
+이슈: DispatcherService가 CongestionControlService를 직접 주입하는 설계 → Lua 내부 처리로 변경
+적용 내용: move-to-ready.lua의 congestion 카운터 감소 통합 코드 반영,
+DispatcherService에서 CongestionControlService 의존 제거, updateCongestionCounters() 메서드 제거
+────────────────────────────────────────
+#: 15
+이슈: BackpressureService에서 NonReadyQueueService 의존 잔존
+적용 내용: NonReadyQueueService 의존 제거 반영, reason 문자열에 Rate Limit 상세 정보 포함
+────────────────────────────────────────
+#: 16
+이슈: BulkActionConfig에 workerPool 섹션 누락, 설정 구조 변경 미반영
+적용 내용: WorkerPoolConfig 인터페이스 추가, 섹션별 DEFAULT 상수 분리 구조 반영,
+BulkActionRedisConfig extends RedisConfig 변경
+────────────────────────────────────────
+#: 17
+이슈: 디렉토리 구조 (파일명 케이싱, 테스트 위치)
+적용 내용: PascalCase 파일명, test/ 디렉토리 분리, congestion.constants.ts 제거 반영
+────────────────────────────────────────
+#: 18
+이슈: CongestionStatsService.recordJobCompletion() 평균 계산 방식 불일치
+적용 내용: 단순 나눗셈 → 증분 평균(incremental mean) 공식 반영
+────────────────────────────────────────
+#: 19
+이슈: 테스트 코드가 실제 테스트 파일과 불일치
+적용 내용: BackoffCalculator.spec.ts, CongestionControlService.spec.ts를 실제 구현 기반으로 전면 갱신.
+given/when/then 주석 패턴, RedisService + RedisKeyBuilder 기반 setup 반영
+────────────────────────────────────────
+#: 20
+이슈: estimateCompletionTime 시그니처 불일치
+적용 내용: 객체 파라미터 → positional 파라미터, 반환값 {estimatedSeconds, estimatedAt: Date} → number(ms)
 ```
