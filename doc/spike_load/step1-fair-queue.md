@@ -105,7 +105,7 @@ Type: Sorted Set
 │ -1706000050  │ customer-B       │
 │ -1706000000  │ customer-C       │
 └──────────────┴──────────────────┘
-→ score가 작을수록 (= 더 오래되었거나 우선순위가 높을수록) 먼저 dequeue
+→ score가 클수록 (= 더 오래되었거나 우선순위가 높을수록) 먼저 dequeue (ZREVRANGE)
 ```
 
 **2) 그룹별 작업 목록 (List)**
@@ -170,64 +170,64 @@ priority = (-1 * now_ms) + base_priority + ALPHA * (-1 + total_jobs / max(1, tot
 **항 1: `-1 * now_ms` (시간 기반 우선순위)**
 
 ```
-오래된 요청: -1706000000000 (= 더 작은 score → 먼저 처리)
-최근 요청:   -1706001000000 (= 더 큰 score → 나중 처리)
+오래된 요청: -1706000000000 (= 더 큰 score → 먼저 처리)
+최근 요청:   -1706001000000 (= 더 작은 score → 나중 처리)
 ```
 
-Sorted Set에서 score가 작은 것이 먼저 꺼내지므로, 오래된 요청이 자연스럽게 우선된다.
+ZREVRANGE로 score가 큰 것을 먼저 꺼내므로, 오래된 요청(-nowMs가 덜 음수)이 자연스럽게 우선된다.
 
 **항 2: `base_priority` (고객사별 고정 우선순위)**
 
 ```
-프리미엄 고객: base_priority = -1000000  → score 감소 → 우선 처리
+프리미엄 고객: base_priority = +1000000  → score 증가 → 우선 처리
 일반 고객:     base_priority = 0
-저우선순위:    base_priority = +1000000  → score 증가 → 후순위
+저우선순위:    base_priority = -1000000  → score 감소 → 후순위
 ```
 
 비즈니스 로직에 따라 고객사별로 차등을 둔다.
 
-**항 3: `ALPHA * (-1 + total_jobs / max(1, total_jobs - done_jobs))` (공정 분배 패널티)**
+**항 3: `ALPHA * (-1 + total_jobs / max(1, total_jobs - done_jobs))` (SJF 부스트)**
 
-이 항은 이름과 달리 순수한 SJF(Shortest Job First)가 아니라, **dequeue 후 해당 그룹의 우선순위를 낮추어 다른 그룹에게 기회를 주는 공정 분배 메커니즘**이다.
+이 항은 **진행률이 높은 그룹의 score를 높여 먼저 완료시키는 SJF(Shortest Job First) 메커니즘**이다.
 
 SJF 항의 수학적 분해: `(-1 + total_jobs / remaining)` = `done_jobs / remaining`
 
 ```
-예시 1: total=1000, done=0    → 0/1000    = 0     (패널티 없음, 아직 시작 전)
-예시 2: total=1000, done=500  → 500/500   = 1     (중간 진행, 약한 패널티)
-예시 3: total=1000, done=990  → 990/10    = 99    (거의 완료, 큰 패널티)
+예시 1: total=1000, done=0    → 0/1000    = 0     (부스트 없음, 아직 시작 전)
+예시 2: total=1000, done=500  → 500/500   = 1     (중간 진행, 약한 부스트)
+예시 3: total=1000, done=990  → 990/10    = 99    (거의 완료, 큰 부스트)
 ```
 
 **ALPHA 부호에 따른 동작 차이:**
 
 | ALPHA 부호 | 동작 | 효과 |
 |-----------|------|------|
-| **양수 (default: 10000)** | 진행률이 높을수록 score 증가 (우선순위 하락) | **공정 분배**: 많이 처리된 그룹은 뒤로, 덜 처리된 그룹이 앞으로 |
-| **음수** | 진행률이 높을수록 score 감소 (우선순위 상승) | **SJF**: 거의 완료된 그룹을 빨리 끝내줌 |
+| **양수 (default: 10000)** | 진행률이 높을수록 score 증가 (우선순위 상승) | **SJF**: 거의 완료된 그룹을 빨리 끝내줌 |
+| **음수** | 진행률이 높을수록 score 감소 (우선순위 하락) | **공정 분배**: 많이 처리된 그룹은 뒤로, 덜 처리된 그룹이 앞으로 |
 
 **기본 설정(ALPHA=양수)에서의 동작 원리:**
 
-dequeue 시마다 우선순위가 재계산되므로, 한 그룹에서 작업을 꺼내면 해당 그룹의 score가 증가(= 우선순위 하락)하여 다음 dequeue에서 다른 그룹이 선택된다. 이것이 **Round-Robin과 유사한 공정 분배** 효과를 만든다.
+dequeue 시마다 우선순위가 재계산되므로, 한 그룹에서 작업을 꺼내면 해당 그룹의 score가 증가(= 우선순위 상승)하여 **거의 완료된 그룹을 빨리 끝내는 SJF** 효과를 만든다.
 
 ```
 dequeue 전:
-  고객사A (done=100/1000, score=-1706000100000)  ← 먼저 선택됨
-  고객사B (done=100/1000, score=-1706000050000)
+  고객사A (done=100/1000, score=-1706000100000)
+  고객사B (done=900/1000, score=-1706000050000)  ← score가 더 크므로 먼저 선택됨 (SJF)
 
-dequeue 후 (고객사A에서 1건 처리):
-  고객사A (done=101/1000, score=-1706000090000)  ← score 증가, 우선순위 하락
-  고객사B (done=100/1000, score=-1706000050000)  ← 이제 고객사B가 먼저
+dequeue 후 (고객사B에서 1건 처리):
+  고객사B (done=901/1000, score=-1706000040000)  ← score 더 증가, 계속 우선
+  고객사A (done=100/1000, score=-1706000100000)
 ```
 
-**SJF 효과가 필요한 경우:**
+**공정 분배가 필요한 경우:**
 
-거의 완료된 그룹을 빨리 끝내서 리소스를 해제하고 싶다면 ALPHA를 **음수**로 설정한다.
+고객사 간 공정한 분배가 필요하다면 ALPHA를 **음수**로 설정한다.
 
 ```typescript
-// 공정 분배 모드 (기본값, 권장)
+// SJF 모드 (기본값 — 거의 완료된 그룹 우선)
 fairQueue: { alpha: 10000 }
 
-// SJF 모드 (거의 완료된 그룹 우선)
+// 공정 분배 모드 (덜 처리된 그룹 우선)
 fairQueue: { alpha: -10000 }
 ```
 
@@ -241,8 +241,8 @@ fairQueue: { alpha: -10000 }
 
 | 시나리오 | 권장 설정 |
 |---------|----------|
-| 고객사 간 공정성이 중요 | ALPHA = +10,000 (양수) |
-| 남은 작업이 적은 그룹을 빨리 완료 | ALPHA = -10,000 (음수) |
+| 남은 작업이 적은 그룹을 빨리 완료 (SJF) | ALPHA = +10,000 (양수) |
+| 고객사 간 공정성이 중요 (공정 분배) | ALPHA = -10,000 (음수) |
 | 순수 시간순 처리 | ALPHA = 0 |
 
 실제 운영에서는 부하 테스트를 통해 적절한 ALPHA 값과 부호를 찾아야 한다.
@@ -352,8 +352,8 @@ local queues = {KEYS[1], KEYS[2], KEYS[3]}
 for _, queueKey in ipairs(queues) do
   -- 같은 큐 내에서 유효한 그룹을 찾을 때까지 반복
   while true do
-    -- 1. 가장 높은 우선순위 그룹 조회 (score가 가장 작은 것)
-    local result = redis.call('ZRANGE', queueKey, 0, 0, 'WITHSCORES')
+    -- 1. 가장 높은 우선순위 그룹 조회 (score가 가장 큰 것)
+    local result = redis.call('ZREVRANGE', queueKey, 0, 0, 'WITHSCORES')
 
     if #result == 0 then
       break  -- 이 큐에 그룹이 없음, 다음 priority 큐로
@@ -445,35 +445,37 @@ return 0  -- 아직 진행 중
 ```
 libs/bulk-action/
 ├── src/
-│   ├── index.ts                          # public API exports
-│   ├── bulk-action.module.ts             # 루트 모듈
+│   ├── BulkActionModule.ts               # 루트 모듈
 │   ├── config/
-│   │   └── bulk-action.config.ts         # 설정 인터페이스
+│   │   └── BulkActionConfig.ts           # 설정 인터페이스
 │   ├── fair-queue/
-│   │   ├── fair-queue.service.ts         # 큐 관리 서비스
-│   │   ├── fair-queue.constants.ts       # 상수 정의
-│   │   ├── priority-calculator.ts        # 우선순위 계산 유틸리티 (테스트 검증용)
-│   │   └── priority-calculator.spec.ts    # 단위 테스트
+│   │   ├── FairQueueService.ts           # 큐 관리 서비스
+│   │   └── PriorityCalculator.ts         # 우선순위 계산 유틸리티 (테스트 검증용)
+│   ├── key/
+│   │   └── RedisKeyBuilder.ts            # Redis 키 생성 서비스
 │   ├── lua/
 │   │   ├── enqueue.lua                   # 작업 등록 스크립트
 │   │   ├── dequeue.lua                   # 작업 꺼내기 스크립트
 │   │   ├── ack.lua                       # 작업 완료 스크립트
-│   │   └── lua-script-loader.ts          # Lua 스크립트 로더
-│   ├── model/
-│   │   ├── job.ts                        # Job 인터페이스
-│   │   ├── job-group.ts                  # JobGroup 인터페이스
-│   │   └── enqueue-options.ts            # Enqueue 옵션 타입
-│   └── redis/
-│       └── redis.provider.ts             # Redis 연결 프로바이더
+│   │   └── LuaScriptLoader.ts            # Lua 스크립트 로더
+│   └── model/
+│       ├── Job.ts                        # Job 인터페이스
+│       ├── JobGroup.ts                   # JobGroup 인터페이스
+│       ├── JobResult.ts                  # 작업 결과 인터페이스 (Step 4 Worker 연동)
+│       └── EnqueueOptions.ts             # Enqueue 옵션 타입
+├── test/
 └── tsconfig.lib.json
 ```
 
-### 의존성 설치
+> **Redis 연결:**
+> 자체 Redis Provider를 두지 않고, monorepo의 공용 라이브러리 `@app/redis`의 `RedisModule`/`RedisService`를 사용한다.
+> Redis 연결 생명주기(생성/종료)는 `RedisService`가 관리하므로 bulk-action 모듈에서 별도로 처리하지 않는다.
 
-```bash
-npm install ioredis
-npm install -D @types/ioredis
-```
+### 의존성
+
+Redis 연결은 monorepo의 공용 라이브러리 `@app/redis`(`libs/redis`)를 사용한다.
+`RedisModule.register(config)`로 Redis 연결을 생성하고, `RedisService`를 통해
+일반 명령(`list`, `sortedSet`, `hash` 등)과 Lua 커스텀 명령(`callCommand`, `defineCommand`)을 호출한다.
 
 ### 프로젝트 설정
 
@@ -536,7 +538,7 @@ npm install -D @types/ioredis
 
 ### 모델 정의
 
-**`model/job.ts`**
+**`model/Job.ts`**
 
 ```typescript
 export interface Job {
@@ -557,7 +559,7 @@ export enum JobStatus {
 }
 ```
 
-**`model/job-group.ts`**
+**`model/JobGroup.ts`**
 
 ```typescript
 export interface JobGroup {
@@ -576,6 +578,9 @@ export enum PriorityLevel {
   LOW = 'low',
 }
 
+/** Redis HGETALL 결과를 타입 안전하게 다루기 위한 유틸리티 타입 */
+export type JobGroupHash = Record<keyof JobGroup, string>;
+
 export enum GroupStatus {
   CREATED = 'CREATED',
   DISPATCHED = 'DISPATCHED',
@@ -586,10 +591,10 @@ export enum GroupStatus {
 }
 ```
 
-**`model/enqueue-options.ts`**
+**`model/EnqueueOptions.ts`**
 
 ```typescript
-import { PriorityLevel } from './job-group';
+import { PriorityLevel } from './JobGroup';
 
 export interface EnqueueOptions {
   groupId: string;
@@ -601,122 +606,147 @@ export interface EnqueueOptions {
 }
 ```
 
-### 설정
+**`model/JobResult.ts`**
 
-**`config/bulk-action.config.ts`**
+> Step 4 Worker에서 작업 처리 결과를 표현하기 위한 인터페이스이다.
+> `ack()` 호출 시 성공/실패 판별과 재시도 여부 결정에 사용된다.
 
 ```typescript
-export interface BulkActionConfig {
-  redis: {
-    host: string;
-    port: number;
-    password?: string;
-    db?: number;
-    keyPrefix?: string;  // Service 레이어에서 키 생성 시 사용 (default: 'bulk-action:')
-                         // ⚠ ioredis keyPrefix로는 전달하지 않는다. (Lua 호환성)
+export interface JobResult {
+  jobId: string;
+  groupId: string;
+  success: boolean;
+  data?: unknown;
+  error?: {
+    message: string;
+    code?: string;
+    retryable: boolean;
   };
-  fairQueue: {
-    alpha: number;       // 공정 분배 가중치 (양수: 공정분배, 음수: SJF, default: 10000)
-  };
+  durationMs: number;
+}
+```
+
+### 설정
+
+**`config/BulkActionConfig.ts`**
+
+> Step 1에서는 `redis`와 `fairQueue` 섹션만 사용한다.
+> `backpressure`, `congestion`, `workerPool`은 후속 Step에서 추가된 설정이다.
+
+```typescript
+import { RedisConfig } from '@app/redis/RedisConfig';
+
+export const BULK_ACTION_CONFIG = Symbol('BULK_ACTION_CONFIG');
+
+export interface BulkActionRedisConfig extends RedisConfig {
+  keyPrefix?: string;  // RedisKeyBuilder에서 키 생성 시 사용 (default: 'bulk-action:')
+                       // ⚠ ioredis keyPrefix로는 전달하지 않는다. (Lua 호환성)
 }
 
-export const DEFAULT_BULK_ACTION_CONFIG: BulkActionConfig = {
-  redis: {
-    host: 'localhost',
-    port: 6379,
-    db: 0,
-    keyPrefix: 'bulk-action:',
-  },
-  fairQueue: {
-    alpha: 10000,
-  },
+export interface FairQueueConfig {
+  alpha: number;       // SJF 가중치 (양수: SJF, 음수: 공정분배, default: 10000)
+}
+
+export interface BulkActionConfig {
+  redis: BulkActionRedisConfig;
+  fairQueue: FairQueueConfig;
+  backpressure: BackpressureConfig;      // Step 2
+  congestion: CongestionConfig;          // Step 3
+  workerPool: WorkerPoolConfig;          // Step 4
+}
+
+export const DEFAULT_FAIR_QUEUE_CONFIG: FairQueueConfig = {
+  alpha: 10000,
 };
 ```
 
-### Redis Provider
+### Redis 키 빌더
 
-**`redis/redis.provider.ts`**
+**`key/RedisKeyBuilder.ts`**
+
+> **역할:** FairQueueService의 인라인 키 생성 헬퍼를 별도 서비스로 추출하여,
+> Backpressure·Congestion 등 후속 Step 서비스들과 키 생성 로직을 공유한다.
 
 ```typescript
-import { Provider } from '@nestjs/common';
-import Redis from 'ioredis';
-import { BulkActionConfig } from '../config/bulk-action.config';
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  BULK_ACTION_CONFIG,
+  BulkActionConfig,
+} from '../config/BulkActionConfig';
+import { PriorityLevel } from '../model/JobGroup';
 
-export const REDIS_CLIENT = Symbol('REDIS_CLIENT');
-export const BULK_ACTION_CONFIG = Symbol('BULK_ACTION_CONFIG');
+@Injectable()
+export class RedisKeyBuilder {
+  private readonly prefix: string;
 
-export const redisProvider: Provider = {
-  provide: REDIS_CLIENT,
-  useFactory: (config: BulkActionConfig): Redis => {
-    // ⚠ keyPrefix는 사용하지 않는다.
-    //   Lua 스크립트 내부에서 생성하는 키에는 ioredis keyPrefix가 적용되지 않아
-    //   KEYS[]와 내부 키 간 불일치가 발생하기 때문이다.
-    //   대신 Service 레이어에서 full key를 직접 생성한다.
-    return new Redis({
-      host: config.redis.host,
-      port: config.redis.port,
-      password: config.redis.password,
-      db: config.redis.db,
-      retryStrategy: (times: number) => Math.min(times * 50, 2000),
-    });
-  },
-  inject: [BULK_ACTION_CONFIG],
-};
+  constructor(@Inject(BULK_ACTION_CONFIG) config: BulkActionConfig) {
+    this.prefix = config.redis.keyPrefix ?? 'bulk-action:';
+  }
+
+  /** Lua 스크립트에 raw prefix를 전달할 때 사용 */
+  getPrefix(): string {
+    return this.prefix;
+  }
+
+  // ── Fair Queue ──
+
+  fairQueue(level: PriorityLevel): string {
+    return `${this.prefix}fair-queue:${level}`;
+  }
+
+  groupJobs(groupId: string): string {
+    return `${this.prefix}group:${groupId}:jobs`;
+  }
+
+  groupMeta(groupId: string): string {
+    return `${this.prefix}group:${groupId}:meta`;
+  }
+
+  job(jobId: string): string {
+    return `${this.prefix}job:${jobId}`;
+  }
+}
 ```
 
 ### Lua 스크립트 로더
 
-**`lua/lua-script-loader.ts`**
+**`lua/LuaScriptLoader.ts`**
 
 ```typescript
-import { Injectable, OnModuleInit, Inject } from '@nestjs/common';
-import Redis from 'ioredis';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { REDIS_CLIENT } from '../redis/redis.provider';
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
 
 @Injectable()
 export class LuaScriptLoader implements OnModuleInit {
-  private scripts: Map<string, string> = new Map();
-
-  constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
-  ) {}
+  constructor(private readonly redisService: RedisService) {}
 
   async onModuleInit(): Promise<void> {
-    await this.loadScript('enqueue', 'enqueue.lua');
-    await this.loadScript('dequeue', 'dequeue.lua');
-    await this.loadScript('ack', 'ack.lua');
+    // Fair Queue (Step 1)
+    await this.loadScript('enqueue', 'enqueue.lua', 4);
+    await this.loadScript('dequeue', 'dequeue.lua', 3);
+    await this.loadScript('ack', 'ack.lua', 2);
   }
 
-  private async loadScript(name: string, filename: string): Promise<void> {
+  private async loadScript(
+    name: string,
+    filename: string,
+    numberOfKeys: number,
+  ): Promise<void> {
     // ⚠ __dirname 기반 경로는 빌드 후 dist/ 환경에서 .lua 파일이 존재해야 동작한다.
     //   nest-cli.json의 compilerOptions.assets 설정으로 .lua 파일을 복사해야 한다.
-    //   (아래 "운영 고려사항 > 빌드 시 Lua 파일 복사" 참고)
     const luaPath = path.join(__dirname, filename);
-    const script = await fs.readFile(luaPath, 'utf-8');
-    // defineCommand를 통해 Redis에 커스텀 명령 등록
-    this.redis.defineCommand(name, {
-      numberOfKeys: this.getKeyCount(name),
-      lua: script,
-    });
-    this.scripts.set(name, script);
-  }
+    const lua = await fs.readFile(luaPath, 'utf-8');
 
-  private getKeyCount(name: string): number {
-    const keyCounts: Record<string, number> = {
-      enqueue: 4,  // fair-queue set, group jobs list, group meta hash, job hash
-      dequeue: 3,  // high queue, normal queue, low queue
-      ack: 2,      // job hash, group meta hash
-    };
-    return keyCounts[name] ?? 0;
+    this.redisService.defineCommand({ name, numberOfKeys, lua });
   }
 }
 ```
 
 ### 우선순위 계산기
 
-**`fair-queue/priority-calculator.ts`**
+**`fair-queue/PriorityCalculator.ts`**
 
 > **이 클래스는 단위 테스트에서 우선순위 공식을 검증하기 위한 용도이다.**
 > 실제 운영에서의 우선순위 계산은 Lua 스크립트(enqueue.lua, dequeue.lua)가 수행한다.
@@ -729,11 +759,11 @@ export class PriorityCalculator {
   /**
    * Fair Queue 우선순위를 계산한다.
    *
-   * score가 작을수록 높은 우선순위를 가진다.
-   * - 시간: 오래된 요청일수록 score가 작다
-   * - basePriority: 음수일수록 우선 처리
-   * - 공정 분배 패널티: ALPHA 양수 → 진행률 높은 그룹 후순위 (공정 분배)
-   *                     ALPHA 음수 → 진행률 높은 그룹 우선 (SJF)
+   * score가 클수록 높은 우선순위를 가진다 (ZREVRANGE).
+   * - 시간: 오래된 요청일수록 score가 크다 (-nowMs가 덜 음수)
+   * - basePriority: 양수일수록 우선 처리
+   * - SJF 부스트: ALPHA 양수 → 진행률 높은 그룹 우선 (SJF)
+   *               ALPHA 음수 → 진행률 높은 그룹 후순위 (공정 분배)
    *
    * ⚠ 이 공식은 enqueue.lua, dequeue.lua의 Lua 구현과 동일해야 한다.
    */
@@ -753,69 +783,41 @@ export class PriorityCalculator {
 
 ### Fair Queue Service
 
-**`fair-queue/fair-queue.service.ts`**
+**`fair-queue/FairQueueService.ts`**
+
+> **Redis 의존성 변경:** ioredis 직접 주입(`REDIS_CLIENT`) 대신 `@app/redis`의 `RedisService`를 사용한다.
+> Lua 커스텀 명령은 `redisService.callCommand(name, keys, args)`로 호출하고,
+> 일반 Redis 명령은 `redisService.list`, `redisService.sortedSet` 등 타입 안전한 facade를 사용한다.
+> Redis 연결 생명주기는 `RedisService`가 관리하므로 `OnModuleDestroy`를 구현하지 않는다.
 
 ```typescript
-import { Injectable, Inject, Logger, OnModuleDestroy } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT } from '../redis/redis.provider';
-import { BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
-import { EnqueueOptions } from '../model/enqueue-options';
-import { Job, JobStatus } from '../model/job';
-import { PriorityLevel } from '../model/job-group';
+import { Injectable, Inject, Logger } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
+import {
+  BULK_ACTION_CONFIG,
+  BulkActionConfig,
+} from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
+import { EnqueueOptions } from '../model/EnqueueOptions';
+import { Job, JobStatus } from '../model/Job';
+import { PriorityLevel } from '../model/JobGroup';
 
-/**
- * ioredis defineCommand로 등록된 커스텀 Lua 명령의 타입 정의.
- * `(this.redis as any)` 대신 타입 안전한 호출을 제공한다.
- */
-interface RedisWithCommands extends Redis {
-  enqueue(
-    queueKey: string,
-    groupJobsKey: string,
-    groupMetaKey: string,
-    jobKey: string,
-    groupId: string,
-    jobId: string,
-    payload: string,
-    basePriority: string,
-    priorityLevel: string,
-    alpha: string,
-    type: string,
-  ): Promise<[number, number]>;
-
-  dequeue(
-    highKey: string,
-    normalKey: string,
-    lowKey: string,
-    alpha: string,
-    keyPrefix: string,
-  ): Promise<string[] | null>;
-
-  ack(
-    jobKey: string,
-    groupMetaKey: string,
-  ): Promise<number>;
+export interface QueueStats {
+  highPriorityGroups: number;
+  normalPriorityGroups: number;
+  lowPriorityGroups: number;
+  totalGroups: number;
 }
 
 @Injectable()
-export class FairQueueService implements OnModuleDestroy {
+export class FairQueueService {
   private readonly logger = new Logger(FairQueueService.name);
-  private readonly keyPrefix: string;
-  private readonly redisWithCommands: RedisWithCommands;
 
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
-  ) {
-    this.keyPrefix = config.redis.keyPrefix ?? 'bulk-action:';
-    this.redisWithCommands = redis as unknown as RedisWithCommands;
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    await this.redis.quit();
-    this.logger.log('Redis connection closed');
-  }
+    private readonly keys: RedisKeyBuilder,
+  ) {}
 
   /**
    * 작업을 Fair Queue에 등록한다.
@@ -836,25 +838,25 @@ export class FairQueueService implements OnModuleDestroy {
       priorityLevel = PriorityLevel.NORMAL,
     } = options;
 
-    const queueKey = this.getQueueKey(priorityLevel);
-    const groupJobsKey = this.getGroupJobsKey(groupId);
-    const groupMetaKey = this.getGroupMetaKey(groupId);
-    const jobKey = this.getJobKey(jobId);
+    const keys = [
+      this.keys.fairQueue(priorityLevel),
+      this.keys.groupJobs(groupId),
+      this.keys.groupMeta(groupId),
+      this.keys.job(jobId),
+    ];
+
+    const args = [
+      groupId,
+      jobId,
+      JSON.stringify(payload),
+      basePriority.toString(),
+      priorityLevel,
+      this.config.fairQueue.alpha.toString(),
+      type,
+    ];
 
     try {
-      await this.redisWithCommands.enqueue(
-        queueKey,
-        groupJobsKey,
-        groupMetaKey,
-        jobKey,
-        groupId,
-        jobId,
-        JSON.stringify(payload),
-        basePriority.toString(),
-        priorityLevel,
-        this.config.fairQueue.alpha.toString(),
-        type,
-      );
+      await this.redisService.callCommand('enqueue', keys, args);
 
       this.logger.debug(
         `Enqueued job ${jobId} for group ${groupId} at ${priorityLevel} priority`,
@@ -875,29 +877,27 @@ export class FairQueueService implements OnModuleDestroy {
    * 가장 높은 우선순위 그룹에서 하나의 작업을 반환한다.
    */
   async dequeue(): Promise<Job | null> {
-    const highKey = this.getQueueKey(PriorityLevel.HIGH);
-    const normalKey = this.getQueueKey(PriorityLevel.NORMAL);
-    const lowKey = this.getQueueKey(PriorityLevel.LOW);
+    const keys = [
+      this.keys.fairQueue(PriorityLevel.HIGH),
+      this.keys.fairQueue(PriorityLevel.NORMAL),
+      this.keys.fairQueue(PriorityLevel.LOW),
+    ];
+
+    const args = [
+      this.config.fairQueue.alpha.toString(),
+      this.keys.getPrefix(),
+    ];
 
     try {
-      const result = await this.redisWithCommands.dequeue(
-        highKey,
-        normalKey,
-        lowKey,
-        this.config.fairQueue.alpha.toString(),
-        this.keyPrefix,
-      );
+      const result = await this.redisService.callCommand('dequeue', keys, args);
 
       if (!result) {
         return null;
       }
 
-      return this.parseJobFromRedis(result);
+      return this.parseJobFromRedis(result as string[]);
     } catch (error) {
-      this.logger.error(
-        `Failed to dequeue: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`Failed to dequeue: ${error.message}`, error.stack);
       throw error;
     }
   }
@@ -908,10 +908,9 @@ export class FairQueueService implements OnModuleDestroy {
    * @returns 그룹의 모든 작업이 완료되었으면 true
    */
   async ack(jobId: string, groupId: string): Promise<boolean> {
-    const jobKey = this.getJobKey(jobId);
-    const groupMetaKey = this.getGroupMetaKey(groupId);
+    const keys = [this.keys.job(jobId), this.keys.groupMeta(groupId)];
 
-    const result = await this.redisWithCommands.ack(jobKey, groupMetaKey);
+    const result = await this.redisService.callCommand('ack', keys, []);
     const isGroupCompleted = result === 1;
 
     if (isGroupCompleted) {
@@ -925,7 +924,7 @@ export class FairQueueService implements OnModuleDestroy {
    * 특정 그룹의 대기 중인 작업 수를 조회한다.
    */
   async getGroupPendingCount(groupId: string): Promise<number> {
-    return this.redis.llen(this.getGroupJobsKey(groupId));
+    return this.redisService.list.length(this.keys.groupJobs(groupId));
   }
 
   /**
@@ -933,9 +932,13 @@ export class FairQueueService implements OnModuleDestroy {
    */
   async getQueueStats(): Promise<QueueStats> {
     const [highCount, normalCount, lowCount] = await Promise.all([
-      this.redis.zcard(this.getQueueKey(PriorityLevel.HIGH)),
-      this.redis.zcard(this.getQueueKey(PriorityLevel.NORMAL)),
-      this.redis.zcard(this.getQueueKey(PriorityLevel.LOW)),
+      this.redisService.sortedSet.count(
+        this.keys.fairQueue(PriorityLevel.HIGH),
+      ),
+      this.redisService.sortedSet.count(
+        this.keys.fairQueue(PriorityLevel.NORMAL),
+      ),
+      this.redisService.sortedSet.count(this.keys.fairQueue(PriorityLevel.LOW)),
     ]);
 
     return {
@@ -946,31 +949,13 @@ export class FairQueueService implements OnModuleDestroy {
     };
   }
 
-  // --- Private helpers ---
-  // ⚠ ioredis keyPrefix를 사용하지 않으므로
-  //   모든 helper가 'bulk-action:' prefix를 포함한 full key를 반환한다.
-
-  private getQueueKey(level: PriorityLevel): string {
-    return `${this.keyPrefix}fair-queue:${level}`;
-  }
-
-  private getGroupJobsKey(groupId: string): string {
-    return `${this.keyPrefix}group:${groupId}:jobs`;
-  }
-
-  private getGroupMetaKey(groupId: string): string {
-    return `${this.keyPrefix}group:${groupId}:meta`;
-  }
-
-  private getJobKey(jobId: string): string {
-    return `${this.keyPrefix}job:${jobId}`;
-  }
-
   private parseJobFromRedis(raw: string[]): Job {
     const map: Record<string, string> = {};
+
     for (let i = 0; i < raw.length; i += 2) {
       map[raw[i]] = raw[i + 1];
     }
+
     return {
       id: map.id,
       groupId: map.groupId,
@@ -982,55 +967,66 @@ export class FairQueueService implements OnModuleDestroy {
     };
   }
 }
-
-export interface QueueStats {
-  highPriorityGroups: number;
-  normalPriorityGroups: number;
-  lowPriorityGroups: number;
-  totalGroups: number;
-}
 ```
 
 ### 루트 모듈
 
-**`bulk-action.module.ts`**
+**`BulkActionModule.ts`**
+
+> Redis 연결은 `@app/redis`의 `RedisModule.register()`에 위임한다.
+> Step 2~4의 서비스들도 함께 등록되어 있으나, Step 1의 핵심은
+> `RedisKeyBuilder`, `LuaScriptLoader`, `FairQueueService`이다.
 
 ```typescript
 import { DynamicModule, Module } from '@nestjs/common';
-import { FairQueueService } from './fair-queue/fair-queue.service';
-import { LuaScriptLoader } from './lua/lua-script-loader';
-import { redisProvider, BULK_ACTION_CONFIG } from './redis/redis.provider';
+import { RedisModule } from '@app/redis/RedisModule';
 import {
+  BULK_ACTION_CONFIG,
   BulkActionConfig,
-  DEFAULT_BULK_ACTION_CONFIG,
-} from './config/bulk-action.config';
+  BulkActionRedisConfig,
+  DEFAULT_FAIR_QUEUE_CONFIG,
+  FairQueueConfig,
+} from './config/BulkActionConfig';
+import { FairQueueService } from './fair-queue/FairQueueService';
+import { RedisKeyBuilder } from './key/RedisKeyBuilder';
+import { LuaScriptLoader } from './lua/LuaScriptLoader';
 
 @Module({})
 export class BulkActionModule {
-  static register(config?: Partial<BulkActionConfig>): DynamicModule {
+  static register(
+    config: { redis: BulkActionRedisConfig } & {
+      fairQueue?: Partial<FairQueueConfig>;
+      // backpressure, congestion, workerPool은 후속 Step 문서 참고
+    },
+  ): DynamicModule {
     const mergedConfig: BulkActionConfig = {
-      ...DEFAULT_BULK_ACTION_CONFIG,
-      ...config,
-      redis: {
-        ...DEFAULT_BULK_ACTION_CONFIG.redis,
-        ...config?.redis,
-      },
+      redis: config.redis,
       fairQueue: {
-        ...DEFAULT_BULK_ACTION_CONFIG.fairQueue,
-        ...config?.fairQueue,
+        ...DEFAULT_FAIR_QUEUE_CONFIG,
+        ...config.fairQueue,
       },
+      // ... 후속 Step 설정 병합 생략
     };
 
     return {
       module: BulkActionModule,
+      imports: [
+        RedisModule.register({
+          host: config.redis.host,
+          port: config.redis.port,
+          password: config.redis.password,
+          db: config.redis.db,
+        }),
+      ],
       providers: [
         {
           provide: BULK_ACTION_CONFIG,
           useValue: mergedConfig,
         },
-        redisProvider,
+        RedisKeyBuilder,
         LuaScriptLoader,
         FairQueueService,
+        // ... 후속 Step 서비스 등록 생략
       ],
       exports: [FairQueueService],
     };
@@ -1043,7 +1039,7 @@ export class BulkActionModule {
 **`apps/api/src/ApiModule.ts`** 에서 등록:
 
 ```typescript
-import { BulkActionModule } from '@app/bulk-action';
+import { BulkActionModule } from '@app/bulk-action/BulkActionModule';
 
 @Module({
   imports: [
@@ -1094,7 +1090,7 @@ export class PromotionBulkService {
 describe('PriorityCalculator', () => {
   const calculator = new PriorityCalculator(10000);
 
-  it('오래된 요청이 더 높은 우선순위(낮은 score)를 가진다', () => {
+  it('최근 요청이 더 낮은 score를 가진다 (에이징: 오래 대기할수록 상대적 score 상승)', () => {
     const older = calculator.calculate({
       nowMs: 1706000000000,
       basePriority: 0,
@@ -1107,14 +1103,16 @@ describe('PriorityCalculator', () => {
       totalJobs: 100,
       doneJobs: 0,
     });
-    expect(older).toBeLessThan(newer);
+    // -1 * nowMs이므로 nowMs가 클수록 score가 작다.
+    // 오래 대기한 그룹은 상대적으로 score가 높아져 먼저 dequeue된다 (에이징).
+    expect(newer).toBeLessThan(older);
   });
 
-  it('basePriority가 낮은 그룹이 우선 처리된다', () => {
+  it('basePriority가 높은 그룹이 우선 처리된다', () => {
     const now = Date.now();
     const premium = calculator.calculate({
       nowMs: now,
-      basePriority: -1000000,
+      basePriority: 1000000,
       totalJobs: 100,
       doneJobs: 0,
     });
@@ -1124,10 +1122,10 @@ describe('PriorityCalculator', () => {
       totalJobs: 100,
       doneJobs: 0,
     });
-    expect(premium).toBeLessThan(normal);
+    expect(premium).toBeGreaterThan(normal);
   });
 
-  it('ALPHA 양수일 때 진행률이 높은 그룹의 score가 더 크다 (공정 분배)', () => {
+  it('ALPHA 양수일 때 진행률이 높은 그룹의 score가 더 크다 (SJF)', () => {
     const now = Date.now();
     const almostDone = calculator.calculate({
       nowMs: now,
@@ -1141,12 +1139,12 @@ describe('PriorityCalculator', () => {
       totalJobs: 100,
       doneJobs: 5,
     });
-    // ALPHA=10000 (양수) → 진행률이 높을수록 score 증가 (= 우선순위 하락)
-    // 즉, 많이 처리된 그룹이 뒤로 밀려나야 한다
+    // ALPHA=10000 (양수) → 진행률이 높을수록 score 증가 (= 우선순위 상승)
+    // 즉, 거의 완료된 그룹이 먼저 처리되어야 한다
     expect(almostDone).toBeGreaterThan(justStarted);
   });
 
-  it('ALPHA 음수일 때 진행률이 높은 그룹의 score가 더 작다 (SJF)', () => {
+  it('ALPHA 음수일 때 진행률이 높은 그룹의 score가 더 낮다 (공정 분배)', () => {
     const sjfCalculator = new PriorityCalculator(-10000);
     const now = Date.now();
     const almostDone = sjfCalculator.calculate({
@@ -1161,8 +1159,8 @@ describe('PriorityCalculator', () => {
       totalJobs: 100,
       doneJobs: 5,
     });
-    // ALPHA=-10000 (음수) → 진행률이 높을수록 score 감소 (= 우선순위 상승)
-    // 즉, 거의 완료된 그룹이 먼저 처리되어야 한다
+    // ALPHA=-10000 (음수) → 진행률이 높을수록 score 감소 (= 우선순위 하락)
+    // 즉, 많이 처리된 그룹이 뒤로 밀려나야 한다
     expect(almostDone).toBeLessThan(justStarted);
   });
 });
@@ -1515,4 +1513,44 @@ import 경로를 fs/promises로 수정.
 이슈: [Minor] 프로젝트 설정 가이드 누락
 수정 내용: tsconfig.json path alias, nest-cli.json 프로젝트 등록,
 tsconfig.lib.json 템플릿을 NestJS 모듈 구조 섹션에 추가.
+```
+
+#### 3. 2026-02-10
+```
+#: 19
+이슈: [Major] Redis 의존성 구조가 실제 구현과 불일치
+수정 내용: redis.provider.ts(REDIS_CLIENT 심볼, ioredis 직접 주입) 섹션을
+삭제하고 @app/redis의 RedisService/RedisModule 사용으로 전환.
+FairQueueService·LuaScriptLoader 코드를 RedisService 의존으로 갱신.
+BulkActionModule에 RedisModule.register() import 추가.
+────────────────────────────────────────
+#: 20
+이슈: [Major] 디렉토리 구조가 실제 파일명·구성과 불일치
+수정 내용: PascalCase 파일명으로 갱신(BulkActionModule.ts 등).
+존재하지 않는 index.ts, fair-queue.constants.ts, redis/redis.provider.ts
+삭제. key/RedisKeyBuilder.ts, model/JobResult.ts 추가.
+────────────────────────────────────────
+#: 21
+이슈: [Major] FairQueueService의 onModuleDestroy 불필요
+수정 내용: Redis 연결 생명주기를 RedisService가 관리하므로
+FairQueueService에서 OnModuleDestroy 구현 및 redis.quit() 호출 제거.
+────────────────────────────────────────
+#: 22
+이슈: [Minor] 키 생성 헬퍼가 별도 서비스로 추출됨
+수정 내용: FairQueueService 인라인 헬퍼(getQueueKey 등)를
+RedisKeyBuilder 서비스로 교체. 코드 블록 및 Redis Provider 섹션을
+Redis 키 빌더 섹션으로 변경.
+────────────────────────────────────────
+#: 23
+이슈: [Minor] JobGroupHash 타입 및 JobResult 인터페이스 누락
+수정 내용: JobGroup 모델에 JobGroupHash 유틸리티 타입 추가.
+model/JobResult.ts 인터페이스를 모델 정의 섹션에 추가.
+────────────────────────────────────────
+#: 24
+이슈: [Major] sjfBoost 부호 전환(-→+)에 따른 ALPHA 의미 역전 및 ZRANGE/ZREVRANGE 불일치
+수정 내용: dequeue.lua 코드 블록을 실제 코드와 동일한 ZREVRANGE로 수정.
+score 해석 방향을 "클수록 높은 우선순위"로 통일.
+basePriority 부호 규칙을 양수=프리미엄으로 변경.
+ALPHA 양수=SJF, 음수=공정분배로 설명·예시·튜닝 가이드 전체 갱신.
+테스트 코드 블록을 실제 PriorityCalculator.spec.ts와 일치시킴.
 ```
