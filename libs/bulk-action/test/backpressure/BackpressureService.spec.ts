@@ -120,7 +120,6 @@ describe('BackpressureService', () => {
     it('Rate Limit 초과 작업은 Non-ready Queue로 들어간다', async () => {
       // given - 5건으로 RPS 소진
       for (let i = 0; i < 5; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await backpressure.admit(createMockJob(`job-${i}`, 'customer-A'));
       }
 
@@ -139,7 +138,6 @@ describe('BackpressureService', () => {
     it('Ready Queue가 가득 차면 rejected를 반환한다', async () => {
       // given - readyQueueMaxSize=10 직접 채우기
       for (let i = 0; i < 10; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await readyQueue.push(`fill-${i}`);
       }
 

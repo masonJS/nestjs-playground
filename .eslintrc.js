@@ -71,5 +71,6 @@ module.exports = {
     'import/newline-after-import': ['error', { count: 1 }],
     'max-nested-callbacks': ['error', 5],
     'no-return-await': 'off',
+    'no-await-in-loop': 'off',
   },
 };

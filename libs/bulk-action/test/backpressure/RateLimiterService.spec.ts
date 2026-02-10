@@ -1,3 +1,4 @@
+import { setTimeout } from 'timers/promises';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Configuration } from '@app/config/Configuration';
 import { RedisModule } from '@app/redis/RedisModule';
@@ -84,7 +85,6 @@ describe('RateLimiterService', () => {
       const results = [];
 
       for (let i = 0; i < 10; i++) {
-        // eslint-disable-next-line no-await-in-loop
         const result = await service.checkRateLimit('customer-A');
         results.push(result);
       }
@@ -98,7 +98,6 @@ describe('RateLimiterService', () => {
     it('RPS를 초과하면 거부한다', async () => {
       // given - 10건 허용
       for (let i = 0; i < 10; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await service.checkRateLimit('customer-A');
       }
 
@@ -112,7 +111,6 @@ describe('RateLimiterService', () => {
     it('거부 시 카운터가 롤백되어 이전 카운트를 반환한다', async () => {
       // given
       for (let i = 0; i < 10; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await service.checkRateLimit('customer-A');
       }
 
@@ -128,12 +126,11 @@ describe('RateLimiterService', () => {
     it('다른 윈도우에서는 카운트가 리셋된다', async () => {
       // given
       for (let i = 0; i < 10; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await service.checkRateLimit('customer-A');
       }
 
       // when - 1초 대기하여 새 윈도우 진입
-      await new Promise((resolve) => setTimeout(resolve, 1100));
+      await setTimeout(1100);
       const result = await service.checkRateLimit('customer-A');
 
       // then
@@ -144,7 +141,6 @@ describe('RateLimiterService', () => {
     it('활성 고객사 수에 따라 per-group RPS가 분배된다', async () => {
       // given - globalRps=10, 고객사 A만 있을 때 10 RPS
       for (let i = 0; i < 5; i++) {
-        // eslint-disable-next-line no-await-in-loop
         const result = await service.checkRateLimit('customer-A');
         expect(result.allowed).toBe(true);
       }
@@ -161,12 +157,10 @@ describe('RateLimiterService', () => {
     it('global limit에 먼저 걸리면 per-group과 무관하게 거부한다', async () => {
       // given - globalRps=10, 고객사 2개가 각각 5건씩 → 총 10건
       for (let i = 0; i < 5; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await service.checkRateLimit('customer-A');
       }
 
       for (let i = 0; i < 5; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await service.checkRateLimit('customer-B');
       }
 

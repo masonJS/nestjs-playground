@@ -126,7 +126,6 @@ describe('DispatcherService', () => {
     it('dispatchBatchSize만큼만 이동한다', async () => {
       // given - batchSize=10보다 많은 15개
       for (let i = 0; i < 15; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await nonReadyQueue.push(`job-${i}`, 0, NonReadyReason.RATE_LIMITED);
       }
       await setTimeout(10);
@@ -143,7 +142,6 @@ describe('DispatcherService', () => {
     it('Ready Queue가 가득 차면 이동하지 않는다', async () => {
       // given - readyQueueMaxSize=100 채우기
       for (let i = 0; i < 100; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await readyQueue.push(`ready-${i}`);
       }
       await nonReadyQueue.push('job-001', 0, NonReadyReason.RATE_LIMITED);

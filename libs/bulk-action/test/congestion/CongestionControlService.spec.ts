@@ -96,7 +96,6 @@ describe('CongestionControlService', () => {
     it('작업이 쌓이면 backoff가 증가한다', async () => {
       // given - 10개 작업 추가 (rateLimitSpeed = globalRps/1group = 10)
       for (let i = 0; i < 10; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await service.addToNonReady(`job-${i}`, 'customer-A');
       }
 
@@ -115,7 +114,6 @@ describe('CongestionControlService', () => {
       // rateLimitSpeed = floor(10/2) = 5
       // 5개 작업 추가
       for (let i = 0; i < 5; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await service.addToNonReady(`job-${i}`, 'customer-A');
       }
 
@@ -154,7 +152,6 @@ describe('CongestionControlService', () => {
     it('카운터 감소 후 추가하면 backoff가 줄어든다', async () => {
       // given - 20개 작업
       for (let i = 0; i < 20; i++) {
-        // eslint-disable-next-line no-await-in-loop
         await service.addToNonReady(`job-${i}`, 'customer-A');
       }
 

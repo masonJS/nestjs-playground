@@ -348,10 +348,8 @@ describe('FairQueueService', () => {
       const jobs = [];
 
       for (let i = 0; i < 9; i++) {
-        // eslint-disable-next-line no-await-in-loop
         const job = await service.dequeue();
         expectNonNullable(job);
-        // eslint-disable-next-line no-await-in-loop
         await service.ack(job.id, job.groupId);
         jobs.push(job);
       }
