@@ -12,8 +12,8 @@ local queues = {KEYS[1], KEYS[2], KEYS[3]}
 for _, queueKey in ipairs(queues) do
   -- 같은 큐 내에서 유효한 그룹을 찾을 때까지 반복
   while true do
-    -- 1. 가장 높은 우선순위 그룹 조회 (score가 가장 작은 것)
-    local result = redis.call('ZRANGE', queueKey, 0, 0, 'WITHSCORES')
+    -- 1. 가장 높은 우선순위 그룹 조회 (score가 가장 큰 것)
+    local result = redis.call('ZREVRANGE', queueKey, 0, 0, 'WITHSCORES')
 
     if #result == 0 then
       break  -- 이 큐에 그룹이 없음, 다음 priority 큐로

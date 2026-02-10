@@ -277,7 +277,7 @@ describe('FairQueueService', () => {
   });
 
   describe('공정 분배', () => {
-    it('ack으로 doneJobs가 증가하면 sjfBoost가 적용되어 그룹이 전환된다', async () => {
+    it('에이징으로 dequeue 후 매 사이클마다 그룹이 교대된다', async () => {
       // given - 두 그룹에 각 3개 작업
       await enqueueJob('group-A', 'A-1');
       await enqueueJob('group-A', 'A-2');
@@ -300,13 +300,13 @@ describe('FairQueueService', () => {
       expectNonNullable(third);
 
       // then
-      // 첫 두 작업은 같은 그룹에서 나온다 (두 번째 dequeue에서 sjfBoost 재계산)
-      expect(second.groupId).toBe(firstGroup);
-      // 세 번째 작업은 다른 그룹에서 나온다 (sjfBoost 적용으로 그룹 전환)
-      expect(third.groupId).not.toBe(firstGroup);
+      // 에이징: dequeue 시 -nowMs 재계산으로 해당 그룹의 score가 하락하여 즉시 교대
+      expect(second.groupId).not.toBe(firstGroup);
+      // 다시 원래 그룹으로 돌아온다
+      expect(third.groupId).toBe(firstGroup);
     });
 
-    it('dequeue+ack 후 sorted set에서 해당 그룹의 순서가 하락한다', async () => {
+    it('dequeue 후 해당 그룹의 score가 하락하여 sorted set 최하위로 이동한다', async () => {
       // given - 두 그룹에 각 3개 작업
       await enqueueJob('group-A', 'A-1');
       await enqueueJob('group-A', 'A-2');
@@ -319,19 +319,16 @@ describe('FairQueueService', () => {
       const first = await service.dequeue();
       expectNonNullable(first);
       const firstGroup = first.groupId;
-      const otherGroup = firstGroup === 'group-A' ? 'group-B' : 'group-A';
       await service.ack(first.id, first.groupId);
 
-      // 두 번째 dequeue 시 doneJobs=1이 반영되어 sjfBoost 재계산
-      await service.dequeue();
-
-      // then - sjfBoost로 인해 firstGroup이 sorted set에서 뒤로 밀린다
+      // then - 에이징으로 인해 dequeue된 그룹의 -nowMs가 더 작아져 score 하락
+      // range()는 score 오름차순이므로, 낮은 score인 firstGroup이 index 0
       const result = await redisService.sortedSet.range(
         `${KEY_PREFIX}fair-queue:normal`,
         0,
         -1,
       );
-      expect(result[0]).toBe(otherGroup);
+      expect(result[0]).toBe(firstGroup);
     });
 
     it('세 그룹의 작업이 dequeue+ack 사이클로 모두 처리된다', async () => {
