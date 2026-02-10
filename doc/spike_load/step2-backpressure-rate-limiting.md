@@ -280,7 +280,9 @@ W2 처음 0.1초:   200건
 > **`floor()` 연산의 RPS 손실:**
 > `floor(10000 / 3) = 3333` → 총 9999 RPS, 1 RPS 미사용. 활성 고객사가 많을수록 이 손실이 누적될 수 있다. 손실이 문제가 된다면 마지막 그룹에 나머지를 할당하거나, global limit만 적용하는 방식을 검토한다.
 
-### Lua 스크립트: rate_limit_check.lua
+### Lua 스크립트: rate-limit-check.lua
+
+> Lua 스크립트 파일명은 kebab-case이며, `LuaScriptLoader`에서 camelCase 커맨드명으로 등록된다 (예: `rate-limit-check.lua` → `rateLimitCheck`).
 
 ```lua
 -- KEYS[1]: per-group rate limit key (e.g., bulk-action:rate-limit:{groupId}:{window})
@@ -368,11 +370,12 @@ Dispatcher는 주기적(예: 100ms)으로 Non-ready Queue를 스캔하여 backof
 > Dispatcher는 Non-ready → Ready 이동 시 Rate Limit을 다시 검사하지 않는다. backoff 시간 동안 충분히 대기했으므로 윈도우가 넘어갔을 가능성이 높지만, 여전히 Rate Limit에 걸릴 수 있다. 이는 의도된 설계로, Dispatcher에서 Rate Limit을 재검사하면 다시 Non-ready Queue로 돌아가는 무한 루프가 발생할 수 있다. 대신, Worker가 실행 시점에 외부 API의 429 응답을 받으면 `backpressure.requeue()`로 Non-ready Queue에 재진입시키는 방식으로 보완한다.
 
 ```lua
--- move_to_ready.lua
+-- move-to-ready.lua (커맨드명: moveToReady)
 -- KEYS[1]: non-ready queue (Sorted Set)
 -- KEYS[2]: ready queue (List)
 -- ARGV[1]: 현재 시각 (epoch ms)
 -- ARGV[2]: 최대 이동 수 (batch size)
+-- ARGV[3]: key prefix (e.g., "bulk-action:")
 
 -- score <= now인 작업을 최대 ARGV[2]개 조회
 local jobs = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, tonumber(ARGV[2]))
@@ -381,20 +384,35 @@ if #jobs == 0 then
   return 0
 end
 
+local prefix = ARGV[3]
+
 -- Non-ready Queue에서 제거 + Ready Queue에 추가를 같은 루프에서 처리
 -- ZREM → RPUSH를 작업 단위로 묶어야, 중간에 오류 발생 시 정합성 추적이 용이하다.
+-- Step 3 연동: 각 작업의 groupId를 조회하여 congestion 카운터도 함께 감소시킨다.
 for _, jobId in ipairs(jobs) do
   redis.call('ZREM', KEYS[1], jobId)
   redis.call('RPUSH', KEYS[2], jobId)
+
+  -- congestion 카운터 감소 (Step 3 연동)
+  local jobKey = prefix .. 'job:' .. jobId
+  local groupId = redis.call('HGET', jobKey, 'groupId')
+  if groupId then
+    local countKey = prefix .. 'congestion:' .. groupId .. ':non-ready-count'
+    local newCount = redis.call('DECR', countKey)
+    if newCount < 0 then
+      redis.call('SET', countKey, '0')
+      newCount = 0
+    end
+  end
 end
 
 return #jobs
 ```
 
-> **ready_queue_push.lua** — Ready Queue 원자적 push
+> **ready-queue-push.lua** (커맨드명: `readyQueuePush`) — Ready Queue 원자적 push
 >
 > ```lua
-> -- ready_queue_push.lua
+> -- ready-queue-push.lua
 > -- KEYS[1]: ready queue (List)
 > -- ARGV[1]: jobId
 > -- ARGV[2]: maxSize
@@ -435,70 +453,105 @@ Fair Queue에서 dequeue 시:
 ```
 libs/bulk-action/src/
 ├── backpressure/
-│   ├── rate-limiter.service.ts           # Fixed Window Rate Limiter
-│   ├── rate-limiter.service.spec.ts      # Rate Limiter 테스트
-│   ├── ready-queue.service.ts            # Ready Queue 관리
-│   ├── ready-queue.service.spec.ts       # Ready Queue 테스트
-│   ├── non-ready-queue.service.ts        # Non-ready Queue 관리
-│   ├── non-ready-queue.service.spec.ts   # Non-ready Queue 테스트
-│   ├── dispatcher.service.ts             # Non-ready → Ready 이동
-│   └── backpressure.constants.ts         # 상수 정의
+│   ├── BackpressureService.ts            # 통합 오케스트레이터
+│   ├── RateLimiterService.ts             # Fixed Window Rate Limiter
+│   ├── ReadyQueueService.ts              # Ready Queue 관리
+│   ├── NonReadyQueueService.ts           # Non-ready Queue 관리
+│   └── DispatcherService.ts              # Non-ready → Ready 이동
 ├── config/
-│   └── bulk-action.config.ts             # 설정에 backpressure 항목 추가
+│   └── BulkActionConfig.ts               # 설정 (backpressure + congestion + workerPool)
+├── key/
+│   └── RedisKeyBuilder.ts                # Redis 키 빌더 (동적 prefix 지원)
 └── lua/
-    ├── rate_limit_check.lua              # Rate Limit 검사
-    ├── ready_queue_push.lua              # Ready Queue 원자적 push (LLEN+RPUSH)
-    └── move_to_ready.lua                 # Non-ready → Ready 이동
+    ├── LuaScriptLoader.ts                # Lua 스크립트 로더
+    ├── rate-limit-check.lua              # Rate Limit 검사
+    ├── ready-queue-push.lua              # Ready Queue 원자적 push (LLEN+RPUSH)
+    └── move-to-ready.lua                 # Non-ready → Ready 이동
 ```
 
 ### 설정 확장
 
-**`config/bulk-action.config.ts`** (Step 1에서 확장)
+**`config/BulkActionConfig.ts`** (Step 1에서 확장)
 
 ```typescript
-export interface BulkActionConfig {
-  redis: {
-    host: string;
-    port: number;
-    password?: string;
-    db?: number;
-    keyPrefix?: string;
-  };
-  fairQueue: {
-    alpha: number;
-  };
-  backpressure: {
-    globalRps: number;          // 전체 RPS 상한 (default: 10000)
-    readyQueueMaxSize: number;  // Ready Queue 최대 크기 (default: 10000)
-    rateLimitWindowSec: number; // Rate Limit 윈도우 크기 (default: 1)
-    rateLimitKeyTtlSec: number; // Rate Limit 키 TTL (default: 2)
-    dispatchIntervalMs: number; // Dispatcher 실행 주기 (default: 100)
-    dispatchBatchSize: number;  // Dispatcher 1회 이동량 (default: 100)
-    defaultBackoffMs: number;   // 기본 backoff 시간 (default: 1000)
-    maxBackoffMs: number;       // 최대 backoff 시간 (default: 60000)
-  };
+import { RedisConfig } from '@app/redis/RedisConfig';
+
+export const BULK_ACTION_CONFIG = Symbol('BULK_ACTION_CONFIG');
+
+export interface BulkActionRedisConfig extends RedisConfig {
+  keyPrefix?: string;
 }
 
-export const DEFAULT_BULK_ACTION_CONFIG: BulkActionConfig = {
-  redis: {
-    host: 'localhost',
-    port: 6379,
-    db: 0,
-    keyPrefix: 'bulk-action:',
-  },
-  fairQueue: {
-    alpha: 10000,
-  },
-  backpressure: {
-    globalRps: 10000,
-    readyQueueMaxSize: 10000,
-    rateLimitWindowSec: 1,
-    rateLimitKeyTtlSec: 2,
-    dispatchIntervalMs: 100,
-    dispatchBatchSize: 100,
-    defaultBackoffMs: 1000,
-    maxBackoffMs: 60000,
-  },
+export interface FairQueueConfig {
+  alpha: number;
+}
+
+export interface BackpressureConfig {
+  globalRps: number;          // 전체 RPS 상한 (default: 10000)
+  readyQueueMaxSize: number;  // Ready Queue 최대 크기 (default: 10000)
+  rateLimitWindowSec: number; // Rate Limit 윈도우 크기 (default: 1)
+  rateLimitKeyTtlSec: number; // Rate Limit 키 TTL (default: 2)
+  dispatchIntervalMs: number; // Dispatcher 실행 주기 (default: 100)
+  dispatchBatchSize: number;  // Dispatcher 1회 이동량 (default: 100)
+  defaultBackoffMs: number;   // 기본 backoff 시간 (default: 1000)
+  maxBackoffMs: number;       // 최대 backoff 시간 (default: 60000)
+}
+
+export interface CongestionConfig {
+  enabled: boolean;           // 혼잡 제어 활성화 여부 (default: true)
+  baseBackoffMs: number;      // 기본 backoff 시간 (default: 1000)
+  maxBackoffMs: number;       // 최대 backoff 시간 (default: 120000)
+  statsRetentionMs: number;   // 통계 보존 시간 (default: 3600000)
+}
+
+export interface WorkerPoolConfig {
+  workerCount: number;          // Worker 수 (default: 10)
+  fetchIntervalMs: number;      // Fetcher 실행 주기 (default: 200)
+  fetchBatchSize: number;       // Fetcher 1회 가져오기 수 (default: 50)
+  workerTimeoutSec: number;     // Worker 블로킹 타임아웃 (default: 5)
+  jobTimeoutMs: number;         // 작업 타임아웃 (default: 30000)
+  maxRetryCount: number;        // 최대 재시도 횟수 (default: 3)
+  shutdownGracePeriodMs: number;// 종료 유예 시간 (default: 30000)
+}
+
+export interface BulkActionConfig {
+  redis: BulkActionRedisConfig;
+  fairQueue: FairQueueConfig;
+  backpressure: BackpressureConfig;
+  congestion: CongestionConfig;
+  workerPool: WorkerPoolConfig;
+}
+```
+
+각 섹션별 기본값은 별도 상수로 분리되어 있다:
+
+```typescript
+export const DEFAULT_BACKPRESSURE_CONFIG: BackpressureConfig = {
+  globalRps: 10000,
+  readyQueueMaxSize: 10000,
+  rateLimitWindowSec: 1,
+  rateLimitKeyTtlSec: 2,
+  dispatchIntervalMs: 100,
+  dispatchBatchSize: 100,
+  defaultBackoffMs: 1000,
+  maxBackoffMs: 60000,
+};
+
+export const DEFAULT_CONGESTION_CONFIG: CongestionConfig = {
+  enabled: true,
+  baseBackoffMs: 1000,
+  maxBackoffMs: 120000,
+  statsRetentionMs: 3600000,
+};
+
+export const DEFAULT_WORKER_POOL_CONFIG: WorkerPoolConfig = {
+  workerCount: 10,
+  fetchIntervalMs: 200,
+  fetchBatchSize: 50,
+  workerTimeoutSec: 5,
+  jobTimeoutMs: 30000,
+  maxRetryCount: 3,
+  shutdownGracePeriodMs: 30000,
 };
 ```
 
@@ -508,13 +561,15 @@ export const DEFAULT_BULK_ACTION_CONFIG: BulkActionConfig = {
 
 ### Rate Limiter Service
 
-**`backpressure/rate-limiter.service.ts`**
+**`backpressure/RateLimiterService.ts`**
+
+> 모든 서비스는 raw ioredis 대신 `RedisService` 래퍼를 주입받고, 키 생성은 `RedisKeyBuilder`에 위임한다.
 
 ```typescript
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -529,59 +584,44 @@ export class RateLimiterService {
   private readonly logger = new Logger(RateLimiterService.name);
 
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly keys: RedisKeyBuilder,
   ) {}
 
-  /**
-   * Fixed Window Rate Limit을 검사한다.
-   *
-   * 전체 RPS와 고객사별 RPS를 모두 확인하여
-   * 둘 다 통과해야 allowed=true를 반환한다.
-   */
   async checkRateLimit(groupId: string): Promise<RateLimitResult> {
-    const { globalRps, rateLimitWindowSec, rateLimitKeyTtlSec } = this.config.backpressure;
+    const { globalRps, rateLimitKeyTtlSec } = this.config.backpressure;
     const window = this.currentWindow();
-    const groupKey = `rate-limit:${groupId}:${window}`;
-    const globalKey = `rate-limit:global:${window}`;
-    const activeGroupsKey = 'active-groups';
 
-    try {
-      const result = await (this.redis as any).rate_limit_check(
-        groupKey,
-        globalKey,
-        activeGroupsKey,
-        globalRps.toString(),
-        groupId,
-        rateLimitKeyTtlSec.toString(),
-      );
+    const result = (await this.redisService.callCommand(
+      'rateLimitCheck',
+      [
+        this.keys.rateLimitGroup(groupId, window),
+        this.keys.rateLimitGlobal(window),
+        this.keys.activeGroups(),
+      ],
+      [globalRps.toString(), groupId, rateLimitKeyTtlSec.toString()],
+    )) as number[];
 
-      const rateLimitResult: RateLimitResult = {
-        allowed: result[0] === 1,
-        globalCount: result[1],
-        globalLimit: result[2],
-        groupCount: result[3],
-        perGroupLimit: result[4],
-      };
+    const rateLimitResult: RateLimitResult = {
+      allowed: result[0] === 1,
+      globalCount: result[1],
+      globalLimit: result[2],
+      groupCount: result[3],
+      perGroupLimit: result[4],
+    };
 
-      if (!rateLimitResult.allowed) {
-        this.logger.debug(
-          `Rate limited: group=${groupId}, ` +
+    if (!rateLimitResult.allowed) {
+      this.logger.debug(
+        `Rate limited: group=${groupId}, ` +
           `global=${rateLimitResult.globalCount}/${rateLimitResult.globalLimit}, ` +
           `group=${rateLimitResult.groupCount}/${rateLimitResult.perGroupLimit}`,
-        );
-      }
-
-      return rateLimitResult;
-    } catch (error) {
-      this.logger.error(`Rate limit check failed: ${error.message}`, error.stack);
-      throw error;
+      );
     }
+
+    return rateLimitResult;
   }
 
-  /**
-   * 현재 Rate Limit 상태를 조회한다 (모니터링용).
-   */
   async getStatus(groupId: string): Promise<{
     globalCount: number;
     globalLimit: number;
@@ -590,15 +630,20 @@ export class RateLimiterService {
     activeGroupCount: number;
   }> {
     const window = this.currentWindow();
-    const [globalCount, groupCount, activeGroupCount] = await Promise.all([
-      this.redis.get(`rate-limit:global:${window}`).then((v) => parseInt(v ?? '0', 10)),
-      this.redis.get(`rate-limit:${groupId}:${window}`).then((v) => parseInt(v ?? '0', 10)),
-      this.redis.scard('active-groups'),
+
+    const [globalRaw, groupRaw, activeGroupCount] = await Promise.all([
+      this.redisService.string.get(this.keys.rateLimitGlobal(window)),
+      this.redisService.string.get(this.keys.rateLimitGroup(groupId, window)),
+      this.redisService.set.size(this.keys.activeGroups()),
     ]);
 
+    const globalCount = parseInt(globalRaw ?? '0', 10);
+    const groupCount = parseInt(groupRaw ?? '0', 10);
     const perGroupLimit = Math.max(
       1,
-      Math.floor(this.config.backpressure.globalRps / Math.max(1, activeGroupCount)),
+      Math.floor(
+        this.config.backpressure.globalRps / Math.max(1, activeGroupCount),
+      ),
     );
 
     return {
@@ -610,103 +655,82 @@ export class RateLimiterService {
     };
   }
 
-  /**
-   * 고객사를 활성 그룹에서 제거한다.
-   * 그룹의 모든 작업이 완료되었을 때 호출한다.
-   */
   async deactivateGroup(groupId: string): Promise<void> {
-    await this.redis.srem('active-groups', groupId);
+    await this.redisService.set.remove(this.keys.activeGroups(), groupId);
     this.logger.debug(`Deactivated group: ${groupId}`);
   }
 
-  /**
-   * 현재 시간의 윈도우 번호를 반환한다.
-   * 1초 단위 Fixed Window.
-   */
   private currentWindow(): number {
-    return Math.floor(Date.now() / (this.config.backpressure.rateLimitWindowSec * 1000));
+    return Math.floor(
+      Date.now() / (this.config.backpressure.rateLimitWindowSec * 1000),
+    );
   }
 }
 ```
 
 ### Ready Queue Service
 
-**`backpressure/ready-queue.service.ts`**
+**`backpressure/ReadyQueueService.ts`**
 
 ```typescript
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
 
 @Injectable()
 export class ReadyQueueService {
   private readonly logger = new Logger(ReadyQueueService.name);
-  private readonly queueKey = 'ready-queue';
 
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly keys: RedisKeyBuilder,
   ) {}
 
   /**
    * Ready Queue에 작업을 추가한다.
+   * Lua 스크립트(readyQueuePush)로 LLEN + RPUSH를 원자적으로 처리한다.
    * 큐 크기가 상한에 도달하면 false를 반환한다.
-   *
-   * ⚠️ LLEN과 RPUSH 사이에 race condition이 존재한다.
-   * 다중 인스턴스 환경에서 LLEN 검사 후 RPUSH 전에 다른 인스턴스가
-   * 작업을 추가하면 maxSize를 초과할 수 있다.
-   * 운영 환경에서는 아래의 Lua 스크립트(ready_queue_push.lua) 사용을 권장한다.
    */
   async push(jobId: string): Promise<boolean> {
-    // 원자적 버전: Lua 스크립트 사용 권장
-    // const result = await (this.redis as any).ready_queue_push(
-    //   this.queueKey, jobId, this.config.backpressure.readyQueueMaxSize.toString(),
-    // );
-    // return result === 1;
+    const result = await this.redisService.callCommand(
+      'readyQueuePush',
+      [this.keys.readyQueue()],
+      [jobId, this.config.backpressure.readyQueueMaxSize.toString()],
+    );
 
-    const currentSize = await this.redis.llen(this.queueKey);
-    if (currentSize >= this.config.backpressure.readyQueueMaxSize) {
+    if (result === 0) {
       this.logger.warn(
-        `Ready Queue full: ${currentSize}/${this.config.backpressure.readyQueueMaxSize}`,
+        `Ready Queue full: maxSize=${this.config.backpressure.readyQueueMaxSize}`,
       );
+
       return false;
     }
 
-    await this.redis.rpush(this.queueKey, jobId);
     return true;
   }
 
-  /**
-   * Ready Queue에서 작업 하나를 꺼낸다.
-   * Worker가 호출한다.
-   */
   async pop(): Promise<string | null> {
-    return this.redis.lpop(this.queueKey);
+    return this.redisService.list.popHead(this.keys.readyQueue());
   }
 
-  /**
-   * Ready Queue에서 작업을 블로킹으로 꺼낸다.
-   * 큐가 비어있으면 timeout까지 대기한다.
-   */
   async blockingPop(timeoutSec: number): Promise<string | null> {
-    const result = await this.redis.blpop(this.queueKey, timeoutSec);
-    return result ? result[1] : null;
+    return this.redisService.list.blockingPopHead(
+      this.keys.readyQueue(),
+      timeoutSec,
+    );
   }
 
-  /**
-   * 현재 Ready Queue 크기를 반환한다.
-   */
   async size(): Promise<number> {
-    return this.redis.llen(this.queueKey);
+    return this.redisService.list.length(this.keys.readyQueue());
   }
 
-  /**
-   * Ready Queue에 여유 공간이 있는지 확인한다.
-   * Fetcher가 Fair Queue에서 dequeue할지 결정할 때 사용한다.
-   */
   async hasCapacity(): Promise<boolean> {
-    const currentSize = await this.redis.llen(this.queueKey);
+    const currentSize = await this.redisService.list.length(
+      this.keys.readyQueue(),
+    );
+
     return currentSize < this.config.backpressure.readyQueueMaxSize;
   }
 }
@@ -714,13 +738,15 @@ export class ReadyQueueService {
 
 ### Non-ready Queue Service
 
-**`backpressure/non-ready-queue.service.ts`**
+**`backpressure/NonReadyQueueService.ts`**
+
+> 그룹별 카운팅 메서드(`incrementGroupCount`, `decrementGroupCount`, `countByGroup`)는 Step 3 혼잡 제어 구현 시 `CongestionControlService`로 이관되어 제거되었다.
 
 ```typescript
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
 
 export enum NonReadyReason {
   RATE_LIMITED = 'RATE_LIMITED',
@@ -731,34 +757,28 @@ export enum NonReadyReason {
 @Injectable()
 export class NonReadyQueueService {
   private readonly logger = new Logger(NonReadyQueueService.name);
-  private readonly queueKey = 'non-ready-queue';
 
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly keys: RedisKeyBuilder,
   ) {}
 
-  /**
-   * Non-ready Queue에 작업을 추가한다.
-   *
-   * @param jobId 작업 ID
-   * @param backoffMs 대기 시간 (ms). 이 시간 후에 Ready Queue로 이동 가능.
-   * @param reason 대기 사유
-   */
   async push(jobId: string, backoffMs: number, reason: NonReadyReason): Promise<void> {
     const clampedBackoff = Math.min(backoffMs, this.config.backpressure.maxBackoffMs);
     const executeAt = Date.now() + clampedBackoff;
 
-    await this.redis.zadd(this.queueKey, executeAt.toString(), jobId);
+    await this.redisService.sortedSet.add(
+      this.keys.nonReadyQueue(),
+      executeAt,
+      jobId,
+    );
 
     this.logger.debug(
-      `Job ${jobId} → Non-ready Queue (reason=${reason}, backoff=${clampedBackoff}ms)`,
+      `Job ${jobId} -> Non-ready Queue (reason=${reason}, backoff=${clampedBackoff}ms)`,
     );
   }
 
-  /**
-   * 지수 백오프를 계산하여 Non-ready Queue에 추가한다.
-   */
   async pushWithExponentialBackoff(
     jobId: string,
     retryCount: number,
@@ -772,130 +792,104 @@ export class NonReadyQueueService {
     await this.push(jobId, backoff, reason);
   }
 
-  /**
-   * backoff가 만료된 작업 목록을 조회한다 (제거하지 않음).
-   */
   async peekReady(limit: number): Promise<string[]> {
     const now = Date.now().toString();
-    return this.redis.zrangebyscore(this.queueKey, '-inf', now, 'LIMIT', 0, limit);
+
+    return this.redisService.sortedSet.rangeByScore(
+      this.keys.nonReadyQueue(),
+      '-inf',
+      now,
+      0,
+      limit,
+    );
   }
 
   /**
-   * backoff가 만료된 작업을 Non-ready Queue에서 제거하고 반환한다.
-   *
    * ⚠️ 비원자성 경고:
    * ZRANGEBYSCORE와 ZREM이 별도 명령으로 실행되므로, 다중 인스턴스 환경에서
    * 두 인스턴스가 동시에 같은 작업을 조회하여 중복 처리할 수 있다.
-   * Dispatcher에서는 반드시 move_to_ready.lua를 통해 원자적으로 처리해야 하며,
+   * Dispatcher에서는 반드시 moveToReady Lua 스크립트를 통해 원자적으로 처리해야 하며,
    * 이 메서드는 단일 인스턴스 테스트 또는 디버깅 용도로만 사용한다.
    */
   async popReady(limit: number): Promise<string[]> {
-    const now = Date.now();
-    const jobs = await this.redis.zrangebyscore(
-      this.queueKey,
+    const now = Date.now().toString();
+    const jobs = await this.redisService.sortedSet.rangeByScore(
+      this.keys.nonReadyQueue(),
       '-inf',
-      now.toString(),
-      'LIMIT',
+      now,
       0,
       limit,
     );
 
     if (jobs.length > 0) {
-      await this.redis.zrem(this.queueKey, ...jobs);
+      await this.redisService.sortedSet.remove(
+        this.keys.nonReadyQueue(),
+        ...jobs,
+      );
     }
 
     return jobs;
   }
 
-  /**
-   * 특정 작업을 Non-ready Queue에서 제거한다.
-   */
   async remove(jobId: string): Promise<void> {
-    await this.redis.zrem(this.queueKey, jobId);
+    await this.redisService.sortedSet.remove(this.keys.nonReadyQueue(), jobId);
   }
 
-  /**
-   * Non-ready Queue의 전체 크기를 반환한다.
-   */
   async size(): Promise<number> {
-    return this.redis.zcard(this.queueKey);
-  }
-
-  /**
-   * 특정 그룹의 Non-ready 작업 수를 반환한다.
-   * Step 3 혼잡 제어에서 동적 backoff 계산에 사용한다.
-   */
-  async countByGroup(groupId: string): Promise<number> {
-    // 그룹별 카운트는 별도 보조 키로 관리하거나,
-    // jobId에 groupId 접두사를 포함시켜 SCAN으로 카운트
-    // 여기서는 성능을 위해 별도 카운터 사용
-    const counterKey = `non-ready-count:${groupId}`;
-    const count = await this.redis.get(counterKey);
-    return parseInt(count ?? '0', 10);
-  }
-
-  /**
-   * 그룹별 Non-ready 카운터를 증가시킨다.
-   */
-  async incrementGroupCount(groupId: string): Promise<void> {
-    await this.redis.incr(`non-ready-count:${groupId}`);
-  }
-
-  /**
-   * 그룹별 Non-ready 카운터를 감소시킨다.
-   */
-  async decrementGroupCount(groupId: string): Promise<void> {
-    const key = `non-ready-count:${groupId}`;
-    const result = await this.redis.decr(key);
-    if (result < 0) {
-      await this.redis.set(key, '0');
-    }
+    return this.redisService.sortedSet.count(this.keys.nonReadyQueue());
   }
 }
 ```
 
 ### Dispatcher Service
 
-**`backpressure/dispatcher.service.ts`**
+**`backpressure/DispatcherService.ts`**
 
 ```typescript
-import { Injectable, Inject, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
-import { ReadyQueueService } from './ready-queue.service';
-import { NonReadyQueueService } from './non-ready-queue.service';
+import { Injectable, Inject, Logger, OnModuleDestroy } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
+import { ReadyQueueService } from './ReadyQueueService';
+
+export enum DispatcherState {
+  IDLE = 'IDLE',
+  RUNNING = 'RUNNING',
+  STOPPED = 'STOPPED',
+}
 
 @Injectable()
-export class DispatcherService implements OnModuleInit, OnModuleDestroy {
+export class DispatcherService implements OnModuleDestroy {
   private readonly logger = new Logger(DispatcherService.name);
-  private intervalHandle: NodeJS.Timeout | null = null;
+  private state: DispatcherState = DispatcherState.IDLE;
+  private intervalHandle: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
 
-  constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
-    @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
-    private readonly readyQueue: ReadyQueueService,
-    private readonly nonReadyQueue: NonReadyQueueService,
-  ) {}
+  private stats = {
+    totalMoved: 0,
+    totalCycles: 0,
+    totalSkipped: 0,
+  };
 
-  onModuleInit(): void {
-    this.start();
-  }
+  constructor(
+    private readonly redisService: RedisService,
+    @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly keys: RedisKeyBuilder,
+    private readonly readyQueue: ReadyQueueService,
+  ) {}
 
   onModuleDestroy(): void {
     this.stop();
   }
 
-  /**
-   * Dispatcher를 시작한다.
-   * 설정된 주기로 Non-ready Queue를 스캔하여 Ready Queue로 이동한다.
-   */
   start(): void {
-    if (this.intervalHandle) return;
+    if (this.state === DispatcherState.RUNNING) {
+      return;
+    }
 
+    this.state = DispatcherState.RUNNING;
     this.intervalHandle = setInterval(
-      () => this.dispatch(),
+      () => void this.dispatch(),
       this.config.backpressure.dispatchIntervalMs,
     );
 
@@ -904,41 +898,63 @@ export class DispatcherService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  /**
-   * Dispatcher를 중지한다.
-   */
   stop(): void {
     if (this.intervalHandle) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
-      this.logger.log('Dispatcher stopped');
     }
+    this.state = DispatcherState.STOPPED;
+    this.logger.log('Dispatcher stopped');
   }
 
-  /**
-   * 1회 dispatch 사이클을 실행한다.
-   *
-   * 1. Ready Queue에 여유 공간이 있는지 확인
-   * 2. Non-ready Queue에서 backoff 만료된 작업 조회
-   * 3. Ready Queue로 이동
-   */
-  private async dispatch(): Promise<void> {
-    if (this.isRunning) return; // 이전 사이클이 아직 실행 중이면 스킵
+  getState(): DispatcherState {
+    return this.state;
+  }
+
+  getStats(): typeof this.stats {
+    return { ...this.stats };
+  }
+
+  /** 테스트에서 수동으로 1회 dispatch를 실행할 때 사용한다. */
+  async dispatchOnce(): Promise<number> {
+    return this.dispatch();
+  }
+
+  private async dispatch(): Promise<number> {
+    if (this.isRunning) {
+      return 0;
+    }
     this.isRunning = true;
 
     try {
+      this.stats.totalCycles++;
+
       const hasCapacity = await this.readyQueue.hasCapacity();
+
       if (!hasCapacity) {
+        this.stats.totalSkipped++;
         this.logger.debug('Ready Queue full, skipping dispatch');
-        return;
+
+        return 0;
       }
 
       const moved = await this.moveToReady();
+
       if (moved > 0) {
-        this.logger.debug(`Dispatched ${moved} jobs from Non-ready → Ready Queue`);
+        this.stats.totalMoved += moved;
+        this.logger.debug(
+          `Dispatched ${moved} jobs from Non-ready -> Ready Queue`,
+        );
       }
+
+      return moved;
     } catch (error) {
-      this.logger.error(`Dispatch failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `Dispatch failed: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+
+      return 0;
     } finally {
       this.isRunning = false;
     }
@@ -946,15 +962,20 @@ export class DispatcherService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Lua 스크립트를 사용하여 원자적으로 Non-ready → Ready Queue 이동을 수행한다.
+   * ARGV[3]으로 prefix를 전달하여 Lua 내부에서 congestion 카운터도 함께 갱신한다.
    */
   private async moveToReady(): Promise<number> {
-    const result = await (this.redis as any).move_to_ready(
-      'non-ready-queue',
-      'ready-queue',
-      Date.now().toString(),
-      this.config.backpressure.dispatchBatchSize.toString(),
+    const result = await this.redisService.callCommand(
+      'moveToReady',
+      [this.keys.nonReadyQueue(), this.keys.readyQueue()],
+      [
+        Date.now().toString(),
+        this.config.backpressure.dispatchBatchSize.toString(),
+        this.keys.getPrefix(),
+      ],
     );
-    return result;
+
+    return result as number;
   }
 }
 ```
@@ -963,14 +984,17 @@ export class DispatcherService implements OnModuleInit, OnModuleDestroy {
 
 Fair Queue에서 꺼낸 작업을 Rate Limit 검사 후 적절한 큐로 분배하는 오케스트레이터이다.
 
-**`backpressure/backpressure.service.ts`**
+**`backpressure/BackpressureService.ts`**
+
+> Step 3 혼잡 제어 구현 완료로, Rate Limit 초과 시 `CongestionControlService.addToNonReady()`에 위임한다.
+> 기존 `calculateBackoff()` 메서드와 `NonReadyQueueService` 직접 의존은 제거되었다.
 
 ```typescript
-import { Injectable, Logger } from '@nestjs/common';
-import { RateLimiterService } from './rate-limiter.service';
-import { ReadyQueueService } from './ready-queue.service';
-import { NonReadyQueueService, NonReadyReason } from './non-ready-queue.service';
-import { Job } from '../model/job';
+import { Injectable } from '@nestjs/common';
+import { RateLimiterService } from './RateLimiterService';
+import { ReadyQueueService } from './ReadyQueueService';
+import { CongestionControlService } from '../congestion/CongestionControlService';
+import { Job } from '../model/Job';
 
 export interface BackpressureResult {
   accepted: boolean;
@@ -980,30 +1004,25 @@ export interface BackpressureResult {
 
 @Injectable()
 export class BackpressureService {
-  private readonly logger = new Logger(BackpressureService.name);
-
   constructor(
     private readonly rateLimiter: RateLimiterService,
     private readonly readyQueue: ReadyQueueService,
-    private readonly nonReadyQueue: NonReadyQueueService,
+    private readonly congestionControl: CongestionControlService,
   ) {}
 
   /**
    * Fair Queue에서 dequeue된 작업을 Rate Limit 검사 후
    * Ready Queue 또는 Non-ready Queue로 분배한다.
    *
-   * 이 메서드가 Fetcher(Step 4)에서 호출되는 핵심 진입점이다.
-   *
    * ⚠️ 작업 유실 구간:
    * `accepted: false` (rejected)를 반환하면 작업은 Fair Queue에서 이미 dequeue된 상태이지만
    * Ready Queue에도 Non-ready Queue에도 들어가지 않는다.
    * 호출자(Fetcher)가 rejected를 받으면 반드시 작업을 Fair Queue에 re-enqueue하거나,
    * Step 6의 In-flight Queue에서 orphan recovery로 복구해야 한다.
-   * Step 6 적용 전까지는 Fetcher에서 `accepted === false` 시 re-enqueue 로직을 구현할 것.
    */
   async admit(job: Job): Promise<BackpressureResult> {
-    // 1. Ready Queue 용량 확인
     const hasCapacity = await this.readyQueue.hasCapacity();
+
     if (!hasCapacity) {
       return {
         accepted: false,
@@ -1012,14 +1031,12 @@ export class BackpressureService {
       };
     }
 
-    // 2. Rate Limit 검사
     const rateLimitResult = await this.rateLimiter.checkRateLimit(job.groupId);
 
     if (rateLimitResult.allowed) {
-      // 3a. Rate Limit 통과 → Ready Queue
       const pushed = await this.readyQueue.push(job.id);
+
       if (!pushed) {
-        // push 시점에 다른 스레드가 채웠을 수 있음
         return {
           accepted: false,
           destination: 'rejected',
@@ -1030,78 +1047,97 @@ export class BackpressureService {
       return { accepted: true, destination: 'ready' };
     }
 
-    // 3b. Rate Limit 초과 → Non-ready Queue
-    const backoffMs = this.calculateBackoff(job.groupId);
-    await this.nonReadyQueue.push(job.id, backoffMs, NonReadyReason.RATE_LIMITED);
-    await this.nonReadyQueue.incrementGroupCount(job.groupId);
+    // Rate Limit 초과 → CongestionControlService가 동적 backoff 계산 후 Non-ready Queue에 추가
+    const backoffResult = await this.congestionControl.addToNonReady(
+      job.id,
+      job.groupId,
+    );
 
     return {
       accepted: true,
       destination: 'non-ready',
-      reason: `Rate limited (global: ${rateLimitResult.globalCount}/${rateLimitResult.globalLimit}, ` +
-              `group: ${rateLimitResult.groupCount}/${rateLimitResult.perGroupLimit})`,
+      reason:
+        `Rate limited (global: ${rateLimitResult.globalCount}/${rateLimitResult.globalLimit}, ` +
+        `group: ${rateLimitResult.groupCount}/${rateLimitResult.perGroupLimit}, ` +
+        `congestion: ${backoffResult.congestionLevel})`,
     };
   }
 
-  /**
-   * 작업 처리 실패 시 Non-ready Queue로 되돌린다.
-   */
-  async requeue(jobId: string, groupId: string, retryCount: number): Promise<void> {
-    await this.nonReadyQueue.pushWithExponentialBackoff(
-      jobId,
-      retryCount,
-      NonReadyReason.TRANSIENT_ERROR,
-    );
-    await this.nonReadyQueue.incrementGroupCount(groupId);
-  }
-
-  /**
-   * backoff 시간을 계산한다.
-   * 기본값은 1초이며, Step 3 혼잡 제어에서 동적 계산으로 대체된다.
-   */
-  private calculateBackoff(groupId: string): number {
-    // Step 3에서 혼잡 제어 로직으로 교체 예정
-    // 현재는 고정 1초 backoff
-    return 1000;
+  async requeue(
+    jobId: string,
+    groupId: string,
+    _retryCount: number,
+  ): Promise<void> {
+    await this.congestionControl.addToNonReady(jobId, groupId);
   }
 }
 ```
 
 ### 모듈 등록
 
-**`bulk-action.module.ts`** (Step 1에서 확장)
+**`BulkActionModule.ts`** (Step 1에서 확장)
 
 ```typescript
 import { DynamicModule, Module } from '@nestjs/common';
-import { FairQueueService } from './fair-queue/fair-queue.service';
-import { LuaScriptLoader } from './lua/lua-script-loader';
-import { redisProvider, BULK_ACTION_CONFIG } from './redis/redis.provider';
-import { RateLimiterService } from './backpressure/rate-limiter.service';
-import { ReadyQueueService } from './backpressure/ready-queue.service';
-import { NonReadyQueueService } from './backpressure/non-ready-queue.service';
-import { DispatcherService } from './backpressure/dispatcher.service';
-import { BackpressureService } from './backpressure/backpressure.service';
+import { RedisModule } from '@app/redis/RedisModule';
+import { BackpressureService } from './backpressure/BackpressureService';
+import { DispatcherService } from './backpressure/DispatcherService';
+import { NonReadyQueueService } from './backpressure/NonReadyQueueService';
+import { RateLimiterService } from './backpressure/RateLimiterService';
+import { ReadyQueueService } from './backpressure/ReadyQueueService';
 import {
+  BackpressureConfig,
+  BULK_ACTION_CONFIG,
   BulkActionConfig,
-  DEFAULT_BULK_ACTION_CONFIG,
-} from './config/bulk-action.config';
+  BulkActionRedisConfig,
+  CongestionConfig,
+  DEFAULT_BACKPRESSURE_CONFIG,
+  DEFAULT_CONGESTION_CONFIG,
+  DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_WORKER_POOL_CONFIG,
+  FairQueueConfig,
+  WorkerPoolConfig,
+} from './config/BulkActionConfig';
+import { CongestionControlService } from './congestion/CongestionControlService';
+import { CongestionStatsService } from './congestion/CongestionStatsService';
+import { FairQueueService } from './fair-queue/FairQueueService';
+import { RedisKeyBuilder } from './key/RedisKeyBuilder';
+import { LuaScriptLoader } from './lua/LuaScriptLoader';
+import { FetcherService } from './worker-pool/FetcherService';
+import { JOB_PROCESSOR } from './worker-pool/JobProcessor';
+import { WorkerPoolService } from './worker-pool/WorkerPoolService';
 
 @Module({})
 export class BulkActionModule {
-  static register(config?: Partial<BulkActionConfig>): DynamicModule {
+  static register(
+    config: { redis: BulkActionRedisConfig } & {
+      fairQueue?: Partial<FairQueueConfig>;
+      backpressure?: Partial<BackpressureConfig>;
+      congestion?: Partial<CongestionConfig>;
+      workerPool?: Partial<WorkerPoolConfig>;
+    },
+  ): DynamicModule {
     const mergedConfig: BulkActionConfig = {
-      ...DEFAULT_BULK_ACTION_CONFIG,
-      ...config,
-      redis: { ...DEFAULT_BULK_ACTION_CONFIG.redis, ...config?.redis },
-      fairQueue: { ...DEFAULT_BULK_ACTION_CONFIG.fairQueue, ...config?.fairQueue },
-      backpressure: { ...DEFAULT_BULK_ACTION_CONFIG.backpressure, ...config?.backpressure },
+      redis: config.redis,
+      fairQueue: { ...DEFAULT_FAIR_QUEUE_CONFIG, ...config.fairQueue },
+      backpressure: { ...DEFAULT_BACKPRESSURE_CONFIG, ...config.backpressure },
+      congestion: { ...DEFAULT_CONGESTION_CONFIG, ...config.congestion },
+      workerPool: { ...DEFAULT_WORKER_POOL_CONFIG, ...config.workerPool },
     };
 
     return {
       module: BulkActionModule,
+      imports: [
+        RedisModule.register({
+          host: config.redis.host,
+          port: config.redis.port,
+          password: config.redis.password,
+          db: config.redis.db,
+        }),
+      ],
       providers: [
         { provide: BULK_ACTION_CONFIG, useValue: mergedConfig },
-        redisProvider,
+        RedisKeyBuilder,
         LuaScriptLoader,
         FairQueueService,
         RateLimiterService,
@@ -1109,11 +1145,19 @@ export class BulkActionModule {
         NonReadyQueueService,
         DispatcherService,
         BackpressureService,
+        CongestionControlService,
+        CongestionStatsService,
+        // Step 4
+        FetcherService,
+        WorkerPoolService,
+        { provide: JOB_PROCESSOR, useValue: [] },
       ],
       exports: [
         FairQueueService,
         BackpressureService,
         ReadyQueueService,
+        CongestionControlService,
+        WorkerPoolService,
       ],
     };
   }
@@ -1198,142 +1242,205 @@ class FetcherService {
 
 ### Rate Limiter 단위 테스트
 
+> 테스트에서는 `BulkActionModule.register()`를 사용하지 않고, 필요한 서비스만 직접 등록한다.
+> `BulkActionConfig`의 모든 섹션(`fairQueue`, `backpressure`, `congestion`, `workerPool`)을 명시적으로 제공해야 한다.
+> `DEFAULT_*_CONFIG` 상수를 활용하면 관심 없는 섹션의 기본값을 쉽게 채울 수 있다.
+
 ```typescript
+import { Test, TestingModule } from '@nestjs/testing';
+import { Configuration } from '@app/config/Configuration';
+import { RedisModule } from '@app/redis/RedisModule';
+import { RedisService } from '@app/redis/RedisService';
+import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
+import { LuaScriptLoader } from '@app/bulk-action/lua/LuaScriptLoader';
+import {
+  BULK_ACTION_CONFIG,
+  BulkActionConfig,
+  DEFAULT_CONGESTION_CONFIG,
+  DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_WORKER_POOL_CONFIG,
+} from '@app/bulk-action/config/BulkActionConfig';
+import { RateLimiterService } from '@app/bulk-action/backpressure/RateLimiterService';
+
 describe('RateLimiterService', () => {
+  let module: TestingModule;
   let service: RateLimiterService;
-  let redis: Redis;
+  let redisService: RedisService;
+
+  const KEY_PREFIX = 'test:';
+  const env = Configuration.getEnv();
+
+  const config: BulkActionConfig = {
+    redis: {
+      host: env.redis.host,
+      port: env.redis.port,
+      password: env.redis.password,
+      db: env.redis.db,
+      keyPrefix: KEY_PREFIX,
+    },
+    fairQueue: DEFAULT_FAIR_QUEUE_CONFIG,
+    backpressure: {
+      globalRps: 10,
+      readyQueueMaxSize: 10000,
+      rateLimitWindowSec: 1,
+      rateLimitKeyTtlSec: 2,
+      dispatchIntervalMs: 100,
+      dispatchBatchSize: 100,
+      defaultBackoffMs: 1000,
+      maxBackoffMs: 60000,
+    },
+    congestion: DEFAULT_CONGESTION_CONFIG,
+    workerPool: DEFAULT_WORKER_POOL_CONFIG,
+  };
 
   beforeAll(async () => {
-    const module = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       imports: [
-        BulkActionModule.register({
-          redis: { host: 'localhost', port: 6379, db: 15 },
-          backpressure: { globalRps: 10 }, // 테스트용 낮은 값
+        RedisModule.register({
+          host: config.redis.host,
+          port: config.redis.port,
+          password: config.redis.password,
+          db: config.redis.db,
         }),
+      ],
+      providers: [
+        { provide: BULK_ACTION_CONFIG, useValue: config },
+        RedisKeyBuilder,
+        LuaScriptLoader,
+        RateLimiterService,
       ],
     }).compile();
 
+    await module.init();
+
     service = module.get(RateLimiterService);
-    redis = module.get(REDIS_CLIENT);
+    redisService = module.get(RedisService);
   });
 
-  afterEach(async () => {
-    await redis.flushdb();
+  beforeEach(async () => {
+    await redisService.flushDatabase();
+  });
+
+  afterAll(async () => {
+    await redisService.flushDatabase();
+    await module.close();
   });
 
   it('RPS 이하의 요청은 모두 허용한다', async () => {
+    // given & when
+    const results = [];
+
     for (let i = 0; i < 10; i++) {
       const result = await service.checkRateLimit('customer-A');
+      results.push(result);
+    }
+
+    // then
+    for (const result of results) {
       expect(result.allowed).toBe(true);
     }
   });
 
   it('RPS를 초과하면 거부한다', async () => {
-    // 10건 허용
+    // given - 10건 허용
     for (let i = 0; i < 10; i++) {
       await service.checkRateLimit('customer-A');
     }
 
-    // 11번째 거부
+    // when - 11번째
     const result = await service.checkRateLimit('customer-A');
+
+    // then
     expect(result.allowed).toBe(false);
   });
 
-  it('다른 윈도우에서는 카운트가 리셋된다', async () => {
+  it('거부 시 카운터가 롤백되어 이전 카운트를 반환한다', async () => {
+    // given
     for (let i = 0; i < 10; i++) {
       await service.checkRateLimit('customer-A');
     }
 
-    // 1초 대기하여 새 윈도우 진입
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-
+    // when
     const result = await service.checkRateLimit('customer-A');
-    expect(result.allowed).toBe(true);
+
+    // then
+    expect(result.allowed).toBe(false);
+    expect(result.globalCount).toBe(10);
+    expect(result.globalLimit).toBe(10);
   });
 
+  it('다른 윈도우에서는 카운트가 리셋된다', async () => {
+    // given
+    for (let i = 0; i < 10; i++) {
+      await service.checkRateLimit('customer-A');
+    }
+
+    // when - 1초 대기하여 새 윈도우 진입
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const result = await service.checkRateLimit('customer-A');
+
+    // then
+    expect(result.allowed).toBe(true);
+    expect(result.globalCount).toBe(1);
+  }, 10000);
+
   it('활성 고객사 수에 따라 per-group RPS가 분배된다', async () => {
-    // globalRps=10, 고객사 2개 → 각 5 RPS
-    // 고객사 A: 5건 허용
+    // given - globalRps=10, 고객사 A만 있을 때 10 RPS
     for (let i = 0; i < 5; i++) {
       const result = await service.checkRateLimit('customer-A');
       expect(result.allowed).toBe(true);
     }
 
-    // 고객사 B 등록 (checkRateLimit 호출 시 active-groups에 자동 등록)
+    // when - 고객사 B 등록 (checkRateLimit 호출 시 active-groups에 자동 등록)
     await service.checkRateLimit('customer-B');
 
-    // 고객사 A 6번째: per-group limit이 5로 줄었으므로 거부
+    // then - 고객사 A 6번째: per-group limit이 5로 줄었으므로 거부
     const result = await service.checkRateLimit('customer-A');
+    expect(result.allowed).toBe(false);
+    expect(result.perGroupLimit).toBe(5);
+  });
+
+  it('global limit에 먼저 걸리면 per-group과 무관하게 거부한다', async () => {
+    // given - globalRps=10, 고객사 2개가 각각 5건씩 → 총 10건
+    for (let i = 0; i < 5; i++) {
+      await service.checkRateLimit('customer-A');
+    }
+
+    for (let i = 0; i < 5; i++) {
+      await service.checkRateLimit('customer-B');
+    }
+
+    // when - 11번째 요청 (고객사 C, per-group은 여유 있지만 global 초과)
+    const result = await service.checkRateLimit('customer-C');
+
+    // then
     expect(result.allowed).toBe(false);
   });
 });
 ```
 
-### Ready Queue / Non-ready Queue 통합 테스트
+### Backpressure 통합 테스트
 
 ```typescript
-describe('Backpressure Flow (Integration)', () => {
-  let backpressure: BackpressureService;
-  let readyQueue: ReadyQueueService;
-  let nonReadyQueue: NonReadyQueueService;
-  let redis: Redis;
-
-  beforeAll(async () => {
-    const module = await Test.createTestingModule({
-      imports: [
-        BulkActionModule.register({
-          redis: { host: 'localhost', port: 6379, db: 15 },
-          backpressure: {
-            globalRps: 5,
-            readyQueueMaxSize: 3,
-          },
-        }),
-      ],
-    }).compile();
-
-    backpressure = module.get(BackpressureService);
-    readyQueue = module.get(ReadyQueueService);
-    nonReadyQueue = module.get(NonReadyQueueService);
-    redis = module.get(REDIS_CLIENT);
-  });
-
-  afterEach(async () => {
-    await redis.flushdb();
-  });
-
-  it('Rate Limit 이내의 작업은 Ready Queue로 들어간다', async () => {
-    const job = createMockJob('job-001', 'customer-A');
-
-    const result = await backpressure.admit(job);
-
-    expect(result.accepted).toBe(true);
-    expect(result.destination).toBe('ready');
-    expect(await readyQueue.size()).toBe(1);
-  });
-
-  it('Rate Limit 초과 작업은 Non-ready Queue로 들어간다', async () => {
-    // 5건으로 RPS 소진
-    for (let i = 0; i < 5; i++) {
-      await backpressure.admit(createMockJob(`job-${i}`, 'customer-A'));
-    }
-
-    // 6번째는 Non-ready로
-    const result = await backpressure.admit(createMockJob('job-5', 'customer-A'));
-    expect(result.destination).toBe('non-ready');
-  });
-
-  it('Ready Queue가 가득 차면 rejected를 반환한다', async () => {
-    // Ready Queue 상한 3개 채우기
-    for (let i = 0; i < 3; i++) {
-      await backpressure.admit(createMockJob(`job-${i}`, 'customer-A'));
-    }
-
-    // 4번째는 rejected
-    const result = await backpressure.admit(createMockJob('job-3', 'customer-A'));
-    expect(result.accepted).toBe(false);
-    expect(result.destination).toBe('rejected');
-  });
-});
+import { Test, TestingModule } from '@nestjs/testing';
+import { Configuration } from '@app/config/Configuration';
+import { RedisModule } from '@app/redis/RedisModule';
+import { RedisService } from '@app/redis/RedisService';
+import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
+import { LuaScriptLoader } from '@app/bulk-action/lua/LuaScriptLoader';
+import {
+  BULK_ACTION_CONFIG,
+  BulkActionConfig,
+  DEFAULT_CONGESTION_CONFIG,
+  DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_WORKER_POOL_CONFIG,
+} from '@app/bulk-action/config/BulkActionConfig';
+import { RateLimiterService } from '@app/bulk-action/backpressure/RateLimiterService';
+import { ReadyQueueService } from '@app/bulk-action/backpressure/ReadyQueueService';
+import { NonReadyQueueService } from '@app/bulk-action/backpressure/NonReadyQueueService';
+import { BackpressureService } from '@app/bulk-action/backpressure/BackpressureService';
+import { CongestionControlService } from '@app/bulk-action/congestion/CongestionControlService';
+import { Job, JobStatus } from '@app/bulk-action/model/Job';
 
 function createMockJob(id: string, groupId: string): Job {
   return {
@@ -1346,69 +1453,246 @@ function createMockJob(id: string, groupId: string): Job {
     createdAt: Date.now(),
   };
 }
+
+describe('BackpressureService', () => {
+  let module: TestingModule;
+  let backpressure: BackpressureService;
+  let readyQueue: ReadyQueueService;
+  let nonReadyQueue: NonReadyQueueService;
+  let redisService: RedisService;
+
+  const KEY_PREFIX = 'test:';
+  const env = Configuration.getEnv();
+
+  const config: BulkActionConfig = {
+    redis: {
+      host: env.redis.host,
+      port: env.redis.port,
+      password: env.redis.password,
+      db: env.redis.db,
+      keyPrefix: KEY_PREFIX,
+    },
+    fairQueue: DEFAULT_FAIR_QUEUE_CONFIG,
+    backpressure: {
+      globalRps: 5,
+      readyQueueMaxSize: 10,
+      rateLimitWindowSec: 10,
+      rateLimitKeyTtlSec: 12,
+      dispatchIntervalMs: 100,
+      dispatchBatchSize: 100,
+      defaultBackoffMs: 1000,
+      maxBackoffMs: 60000,
+    },
+    congestion: DEFAULT_CONGESTION_CONFIG,
+    workerPool: DEFAULT_WORKER_POOL_CONFIG,
+  };
+
+  beforeAll(async () => {
+    module = await Test.createTestingModule({
+      imports: [
+        RedisModule.register({
+          host: config.redis.host,
+          port: config.redis.port,
+          password: config.redis.password,
+          db: config.redis.db,
+        }),
+      ],
+      providers: [
+        { provide: BULK_ACTION_CONFIG, useValue: config },
+        RedisKeyBuilder,
+        LuaScriptLoader,
+        RateLimiterService,
+        ReadyQueueService,
+        NonReadyQueueService,
+        CongestionControlService,
+        BackpressureService,
+      ],
+    }).compile();
+
+    await module.init();
+
+    backpressure = module.get(BackpressureService);
+    readyQueue = module.get(ReadyQueueService);
+    nonReadyQueue = module.get(NonReadyQueueService);
+    redisService = module.get(RedisService);
+  });
+
+  beforeEach(async () => {
+    await redisService.flushDatabase();
+  });
+
+  afterAll(async () => {
+    await redisService.flushDatabase();
+    await module.close();
+  });
+
+  it('Rate Limit 이내의 작업은 Ready Queue로 들어간다', async () => {
+    // given
+    const job = createMockJob('job-001', 'customer-A');
+
+    // when
+    const result = await backpressure.admit(job);
+
+    // then
+    expect(result.accepted).toBe(true);
+    expect(result.destination).toBe('ready');
+    expect(await readyQueue.size()).toBe(1);
+  });
+
+  it('Rate Limit 초과 작업은 Non-ready Queue로 들어간다', async () => {
+    // given - 5건으로 RPS 소진
+    for (let i = 0; i < 5; i++) {
+      await backpressure.admit(createMockJob(`job-${i}`, 'customer-A'));
+    }
+
+    // when - 6번째
+    const result = await backpressure.admit(
+      createMockJob('job-5', 'customer-A'),
+    );
+
+    // then
+    expect(result.accepted).toBe(true);
+    expect(result.destination).toBe('non-ready');
+    expect(result.reason).toContain('Rate limited');
+    expect(await nonReadyQueue.size()).toBe(1);
+  });
+
+  it('Ready Queue가 가득 차면 rejected를 반환한다', async () => {
+    // given - readyQueueMaxSize=10 직접 채우기
+    for (let i = 0; i < 10; i++) {
+      await readyQueue.push(`fill-${i}`);
+    }
+
+    // when
+    const result = await backpressure.admit(
+      createMockJob('job-overflow', 'customer-A'),
+    );
+
+    // then
+    expect(result.accepted).toBe(false);
+    expect(result.destination).toBe('rejected');
+  });
+
+  it('다른 고객사 간 Rate Limit이 분배된다', async () => {
+    // given - globalRps=5, 고객사 2개 → 각 2 RPS (floor(5/2))
+    await backpressure.admit(createMockJob('A-1', 'customer-A'));
+    await backpressure.admit(createMockJob('A-2', 'customer-A'));
+    await backpressure.admit(createMockJob('B-1', 'customer-B'));
+
+    // when - 고객사 A 3번째 (per-group limit 초과)
+    const result = await backpressure.admit(
+      createMockJob('A-3', 'customer-A'),
+    );
+
+    // then
+    expect(result.destination).toBe('non-ready');
+  });
+});
 ```
 
 ### Dispatcher 테스트
 
+> `DispatcherService`는 `dispatchOnce()` 공개 메서드를 제공하므로 테스트에서 수동으로 1회 사이클을 실행할 수 있다.
+
 ```typescript
 describe('DispatcherService', () => {
+  let module: TestingModule;
   let dispatcher: DispatcherService;
   let readyQueue: ReadyQueueService;
   let nonReadyQueue: NonReadyQueueService;
-  let redis: Redis;
+  let redisService: RedisService;
+
+  const KEY_PREFIX = 'test:';
+  const env = Configuration.getEnv();
+
+  const config: BulkActionConfig = {
+    redis: { ...env.redis, keyPrefix: KEY_PREFIX },
+    fairQueue: DEFAULT_FAIR_QUEUE_CONFIG,
+    backpressure: {
+      globalRps: 10000,
+      readyQueueMaxSize: 10000,
+      rateLimitWindowSec: 1,
+      rateLimitKeyTtlSec: 2,
+      dispatchIntervalMs: 50,
+      dispatchBatchSize: 10,
+      defaultBackoffMs: 1000,
+      maxBackoffMs: 60000,
+    },
+    congestion: DEFAULT_CONGESTION_CONFIG,
+    workerPool: DEFAULT_WORKER_POOL_CONFIG,
+  };
 
   beforeAll(async () => {
-    const module = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       imports: [
-        BulkActionModule.register({
-          redis: { host: 'localhost', port: 6379, db: 15 },
-          backpressure: {
-            dispatchIntervalMs: 50, // 테스트용 짧은 주기
-            dispatchBatchSize: 10,
-          },
+        RedisModule.register({
+          host: config.redis.host,
+          port: config.redis.port,
+          password: config.redis.password,
+          db: config.redis.db,
         }),
       ],
+      providers: [
+        { provide: BULK_ACTION_CONFIG, useValue: config },
+        RedisKeyBuilder,
+        LuaScriptLoader,
+        ReadyQueueService,
+        NonReadyQueueService,
+        DispatcherService,
+      ],
     }).compile();
+
+    await module.init();
 
     dispatcher = module.get(DispatcherService);
     readyQueue = module.get(ReadyQueueService);
     nonReadyQueue = module.get(NonReadyQueueService);
-    redis = module.get(REDIS_CLIENT);
-
-    // Dispatcher의 자동 시작을 막고 수동 테스트
-    dispatcher.stop();
+    redisService = module.get(RedisService);
   });
 
-  afterEach(async () => {
-    await redis.flushdb();
+  beforeEach(async () => {
+    await redisService.flushDatabase();
+  });
+
+  afterAll(async () => {
+    await redisService.flushDatabase();
+    await module.close();
   });
 
   it('backoff 만료된 작업이 Ready Queue로 이동한다', async () => {
-    // backoff 0ms로 Non-ready Queue에 추가 (즉시 이동 가능)
+    // given - backoff 0ms (즉시 이동 가능)
     await nonReadyQueue.push('job-001', 0, NonReadyReason.RATE_LIMITED);
-
-    // 약간 대기 후 dispatch
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    // 수동으로 dispatch 1회 실행
-    // (private 메서드이므로 실제로는 start/stop 후 시간 경과로 테스트)
-    // 여기서는 Lua 스크립트 직접 호출로 검증
-    const jobs = await nonReadyQueue.popReady(10);
-    for (const jobId of jobs) {
-      await readyQueue.push(jobId);
-    }
+    // when - dispatchOnce()로 수동 실행
+    const moved = await dispatcher.dispatchOnce();
 
+    // then
+    expect(moved).toBe(1);
     expect(await readyQueue.size()).toBe(1);
     expect(await nonReadyQueue.size()).toBe(0);
   });
 
   it('backoff 미만료 작업은 Non-ready Queue에 남는다', async () => {
-    // 10초 후 만료
+    // given - 10초 후 만료
     await nonReadyQueue.push('job-001', 10000, NonReadyReason.RATE_LIMITED);
 
-    const jobs = await nonReadyQueue.popReady(10);
-    expect(jobs).toHaveLength(0);
+    // when
+    const moved = await dispatcher.dispatchOnce();
+
+    // then
+    expect(moved).toBe(0);
     expect(await nonReadyQueue.size()).toBe(1);
+  });
+
+  it('dispatch 통계를 추적한다', async () => {
+    // when
+    await dispatcher.dispatchOnce();
+    await dispatcher.dispatchOnce();
+
+    // then
+    const stats = dispatcher.getStats();
+    expect(stats.totalCycles).toBe(2);
   });
 });
 ```
@@ -1478,22 +1762,18 @@ const effectiveCount = currentCount * currentWeight + previousCount * (1 - curre
 
 ### 후속 Step과의 연동 인터페이스
 
-#### Step 3 혼잡 제어 — `calculateBackoff()` 교체
+#### Step 3 혼잡 제어 — ✅ 구현 완료
 
-`BackpressureService.calculateBackoff()`는 현재 고정 1초를 반환한다. Step 3에서 `CongestionController`를 주입받아 동적 backoff로 교체한다.
+`BackpressureService`에서 `calculateBackoff()` 메서드가 제거되고, `CongestionControlService.addToNonReady()`로 위임하는 방식으로 교체되었다.
 
 ```typescript
-// Step 2 현재 구현
-private calculateBackoff(groupId: string): number {
-  return 1000; // 고정 1초
-}
-
-// Step 3 적용 후
-private calculateBackoff(groupId: string): number {
-  return this.congestionController.getBackoff(groupId);
-  // → Non-ready Queue 크기, Rate Limit 속도, 외부 API 응답 지연 등을
-  //   종합하여 동적 backoff를 산출
-}
+// 적용 결과 — BackpressureService.admit() 내부
+const backoffResult = await this.congestionControl.addToNonReady(
+  job.id,
+  job.groupId,
+);
+// → CongestionControlService가 Non-ready Queue 크기, Rate Limit 속도 등을
+//   종합하여 동적 backoff를 산출 후 Non-ready Queue에 추가
 ```
 
 #### Step 5 Watcher — active-groups 자동 cleanup
@@ -1537,12 +1817,13 @@ Step 6 적용 시, `admit()`에서 `rejected`된 작업은 In-flight Queue의 or
 
 ### 다음 단계
 
-Step 2가 구현되면 Step 3(혼잡 제어)에서 `calculateBackoff` 메서드를 **동적 backoff 계산**으로 교체한다. 현재는 고정 1초 backoff를 사용하지만, Non-ready Queue의 작업 수와 Rate Limit 속도를 기반으로 공회전을 최소화하는 계산식을 적용한다.
+Step 3(혼잡 제어)는 구현 완료되어 `CongestionControlService`가 동적 backoff를 산출한다.
 
 ```
-현재: backoff = 1000ms (고정)
-Step 3: backoff = 1000 + floor(nonReadyCount / rateLimitSpeed) * 1000
+적용된 계산식: backoff = baseBackoffMs + floor(nonReadyCount / rateLimitSpeed) * 1000
 ```
+
+Step 5(Watcher)와 Step 6(Reliable Queue)은 미구현 상태이다.
 
 
 ### 문서 갱신 히스토리
@@ -1581,5 +1862,32 @@ Step 3: backoff = 1000 + floor(nonReadyCount / rateLimitSpeed) * 1000
 #: 8                                                                                 
 이슈: 후속 Step 연동 인터페이스                                                      
 적용 내용: Step 3 calculateBackoff 교체, Step 5 deactivateGroup 호출, Step 6         
-BLPOP→BRPOPLPUSH 교체, Step 6 rejected 작업 복구 — 코드 예시 포함 
+BLPOP→BRPOPLPUSH 교체, Step 6 rejected 작업 복구 — 코드 예시 포함
+```
+
+#### 2. 2026-02-10
+```
+#: 9
+이슈: Redis 접근 패턴 변경
+적용 내용: raw ioredis → RedisService 래퍼 사용으로 전체 구현 코드 갱신
+────────────────────────────────────────
+#: 10
+이슈: RedisKeyBuilder 추상화 추가
+적용 내용: 하드코딩된 Redis 키 → RedisKeyBuilder 주입 패턴으로 전체 구현 코드 갱신
+────────────────────────────────────────
+#: 11
+이슈: BulkActionConfig 인터페이스 확장
+적용 내용: CongestionConfig(4필드), WorkerPoolConfig(7필드) 섹션 추가,
+BulkActionRedisConfig extends RedisConfig 구조로 변경,
+섹션별 DEFAULT_*_CONFIG 상수 분리 반영
+────────────────────────────────────────
+#: 12
+이슈: Lua 스크립트 네이밍 컨벤션
+적용 내용: 파일명 snake_case → kebab-case, 커맨드명 snake_case → camelCase로 수정
+────────────────────────────────────────
+#: 13
+이슈: 테스트 설정 패턴 갱신
+적용 내용: BulkActionModule.register() 대신 직접 provider 등록 패턴,
+전체 config 섹션 필수 제공, DEFAULT_*_CONFIG 활용,
+RedisService/RedisKeyBuilder/LuaScriptLoader 필수 등록, given/when/then 주석 패턴 반영
 ```
