@@ -9,6 +9,7 @@ import {
   BulkActionConfig,
   DEFAULT_BACKPRESSURE_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_WORKER_POOL_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { CongestionControlService } from '@app/bulk-action/congestion/CongestionControlService';
 import { CongestionLevel } from '@app/bulk-action/congestion/BackoffCalculator';
@@ -41,6 +42,7 @@ describe('CongestionControlService', () => {
       maxBackoffMs: 120000,
       statsRetentionMs: 3600000,
     },
+    workerPool: DEFAULT_WORKER_POOL_CONFIG,
   };
 
   beforeAll(async () => {

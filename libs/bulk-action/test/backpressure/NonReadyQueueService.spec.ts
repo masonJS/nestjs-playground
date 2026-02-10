@@ -8,6 +8,7 @@ import {
   BulkActionConfig,
   DEFAULT_CONGESTION_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_WORKER_POOL_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
 import {
@@ -43,6 +44,7 @@ describe('NonReadyQueueService', () => {
       maxBackoffMs: 60000,
     },
     congestion: DEFAULT_CONGESTION_CONFIG,
+    workerPool: DEFAULT_WORKER_POOL_CONFIG,
   };
 
   beforeAll(async () => {

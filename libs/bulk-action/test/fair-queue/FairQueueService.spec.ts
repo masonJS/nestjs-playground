@@ -10,6 +10,7 @@ import {
   BulkActionConfig,
   DEFAULT_BACKPRESSURE_CONFIG,
   DEFAULT_CONGESTION_CONFIG,
+  DEFAULT_WORKER_POOL_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { JobStatus } from '@app/bulk-action/model/Job';
 import { PriorityLevel, JobGroupHash } from '@app/bulk-action/model/JobGroup';
@@ -36,6 +37,7 @@ describe('FairQueueService', () => {
     },
     backpressure: DEFAULT_BACKPRESSURE_CONFIG,
     congestion: DEFAULT_CONGESTION_CONFIG,
+    workerPool: DEFAULT_WORKER_POOL_CONFIG,
   };
 
   beforeAll(async () => {

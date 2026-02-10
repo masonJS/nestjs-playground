@@ -10,6 +10,7 @@ import {
   BulkActionConfig,
   DEFAULT_CONGESTION_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_WORKER_POOL_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { ReadyQueueService } from '@app/bulk-action/backpressure/ReadyQueueService';
 import {
@@ -48,6 +49,7 @@ describe('DispatcherService', () => {
       maxBackoffMs: 60000,
     },
     congestion: DEFAULT_CONGESTION_CONFIG,
+    workerPool: DEFAULT_WORKER_POOL_CONFIG,
   };
 
   beforeAll(async () => {

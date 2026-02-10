@@ -14,7 +14,9 @@ import {
   DEFAULT_BACKPRESSURE_CONFIG,
   DEFAULT_CONGESTION_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_WORKER_POOL_CONFIG,
   FairQueueConfig,
+  WorkerPoolConfig,
 } from './config/BulkActionConfig';
 import { CongestionControlService } from './congestion/CongestionControlService';
 import { CongestionStatsService } from './congestion/CongestionStatsService';
@@ -29,6 +31,7 @@ export class BulkActionModule {
       fairQueue?: Partial<FairQueueConfig>;
       backpressure?: Partial<BackpressureConfig>;
       congestion?: Partial<CongestionConfig>;
+      workerPool?: Partial<WorkerPoolConfig>;
     },
   ): DynamicModule {
     const mergedConfig: BulkActionConfig = {
@@ -44,6 +47,10 @@ export class BulkActionModule {
       congestion: {
         ...DEFAULT_CONGESTION_CONFIG,
         ...config.congestion,
+      },
+      workerPool: {
+        ...DEFAULT_WORKER_POOL_CONFIG,
+        ...config.workerPool,
       },
     };
 
