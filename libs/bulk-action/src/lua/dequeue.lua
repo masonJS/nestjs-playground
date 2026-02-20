@@ -1,13 +1,12 @@
--- KEYS[1]: high priority queue (e.g., bulk-action:fair-queue:high)
--- KEYS[2]: normal priority queue (e.g., bulk-action:fair-queue:normal)
--- KEYS[3]: low priority queue (e.g., bulk-action:fair-queue:low)
--- ARGV[1]: ALPHA
--- ARGV[2]: key prefix (e.g., 'bulk-action:')
+local highPriorityQueueKey   = KEYS[1]  -- fair-queue:high
+local normalPriorityQueueKey = KEYS[2]  -- fair-queue:normal
+local lowPriorityQueueKey    = KEYS[3]  -- fair-queue:low
 
-local prefix = ARGV[2]
+local alpha  = tonumber(ARGV[1])
+local prefix = ARGV[2]  -- key prefix (e.g., 'bulk-action:')
 
 -- 우선순위 순서대로 큐 탐색
-local queues = {KEYS[1], KEYS[2], KEYS[3]}
+local queues = {highPriorityQueueKey, normalPriorityQueueKey, lowPriorityQueueKey}
 
 for _, queueKey in ipairs(queues) do
   -- 같은 큐 내에서 유효한 그룹을 찾을 때까지 반복
@@ -45,7 +44,6 @@ for _, queueKey in ipairs(queues) do
         local now = redis.call('TIME')
         local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
         local basePriority = tonumber(redis.call('HGET', groupMetaKey, 'basePriority') or '0')
-        local alpha = tonumber(ARGV[1])
         local remaining = math.max(1, totalJobs - doneJobs)
         local sjfBoost = alpha * (-1 + totalJobs / remaining)
         local newPriority = (-1 * nowMs) + basePriority + sjfBoost

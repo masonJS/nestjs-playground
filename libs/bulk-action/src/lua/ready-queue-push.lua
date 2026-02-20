@@ -1,11 +1,12 @@
--- KEYS[1]: ready queue (List)
--- ARGV[1]: jobId
--- ARGV[2]: maxSize
+local readyQueueKey = KEYS[1]  -- ready queue (List)
 
-local currentSize = redis.call('LLEN', KEYS[1])
-if currentSize >= tonumber(ARGV[2]) then
+local jobId   = ARGV[1]
+local maxSize = tonumber(ARGV[2])
+
+local currentSize = redis.call('LLEN', readyQueueKey)
+if currentSize >= maxSize then
   return 0
 end
 
-redis.call('RPUSH', KEYS[1], ARGV[1])
+redis.call('RPUSH', readyQueueKey, jobId)
 return 1

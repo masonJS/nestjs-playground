@@ -1,38 +1,38 @@
--- KEYS[1]: per-group rate limit key (e.g., bulk-action:rate-limit:{groupId}:{window})
--- KEYS[2]: global rate limit key (e.g., bulk-action:rate-limit:global:{window})
--- KEYS[3]: active groups set (e.g., bulk-action:active-groups)
--- ARGV[1]: global RPS limit
--- ARGV[2]: groupId
--- ARGV[3]: key TTL (seconds)
-
--- 1. Register group as active
-redis.call('SADD', KEYS[3], ARGV[2])
-
--- 2. Check global rate limit
-local globalCount = redis.call('INCR', KEYS[2])
-if globalCount == 1 then
-  redis.call('EXPIRE', KEYS[2], tonumber(ARGV[3]))
-end
+local perGroupRateLimitKey = KEYS[1]  -- per-group rate limit key
+local globalRateLimitKey   = KEYS[2]  -- global rate limit key
+local activeGroupsKey      = KEYS[3]  -- active groups set
 
 local globalLimit = tonumber(ARGV[1])
+local groupId     = ARGV[2]
+local keyTtl      = tonumber(ARGV[3])
+
+-- 1. Register group as active
+redis.call('SADD', activeGroupsKey, groupId)
+
+-- 2. Check global rate limit
+local globalCount = redis.call('INCR', globalRateLimitKey)
+if globalCount == 1 then
+  redis.call('EXPIRE', globalRateLimitKey, keyTtl)
+end
+
 if globalCount > globalLimit then
-  redis.call('DECR', KEYS[2])
+  redis.call('DECR', globalRateLimitKey)
   return {0, globalCount - 1, globalLimit, 0, 0}
 end
 
 -- 3. Check per-group rate limit
-local activeGroupCount = redis.call('SCARD', KEYS[3])
+local activeGroupCount = redis.call('SCARD', activeGroupsKey)
 local perGroupLimit = math.floor(globalLimit / math.max(1, activeGroupCount))
 perGroupLimit = math.max(1, perGroupLimit)
 
-local groupCount = redis.call('INCR', KEYS[1])
+local groupCount = redis.call('INCR', perGroupRateLimitKey)
 if groupCount == 1 then
-  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+  redis.call('EXPIRE', perGroupRateLimitKey, keyTtl)
 end
 
 if groupCount > perGroupLimit then
-  redis.call('DECR', KEYS[1])
-  redis.call('DECR', KEYS[2])
+  redis.call('DECR', perGroupRateLimitKey)
+  redis.call('DECR', globalRateLimitKey)
   return {0, globalCount, globalLimit, groupCount - 1, perGroupLimit}
 end
 

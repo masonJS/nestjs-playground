@@ -1,20 +1,19 @@
--- KEYS[1]: non-ready queue (Sorted Set)
--- KEYS[2]: ready queue (List)
--- ARGV[1]: current time (epoch ms)
--- ARGV[2]: max batch size
--- ARGV[3]: key prefix (optional, for congestion counter decrement)
+local nonReadyQueueKey = KEYS[1]  -- non-ready queue (Sorted Set)
+local readyQueueKey    = KEYS[2]  -- ready queue (List)
 
-local jobs = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, tonumber(ARGV[2]))
+local currentTimeMs = ARGV[1]
+local maxBatchSize  = tonumber(ARGV[2])
+local prefix        = ARGV[3]  -- optional, for congestion counter decrement
+
+local jobs = redis.call('ZRANGEBYSCORE', nonReadyQueueKey, '-inf', currentTimeMs, 'LIMIT', 0, maxBatchSize)
 
 if #jobs == 0 then
   return 0
 end
 
-local prefix = ARGV[3]
-
 for _, jobId in ipairs(jobs) do
-  redis.call('ZREM', KEYS[1], jobId)
-  redis.call('RPUSH', KEYS[2], jobId)
+  redis.call('ZREM', nonReadyQueueKey, jobId)
+  redis.call('RPUSH', readyQueueKey, jobId)
 
   if prefix then
     local jobKey = prefix .. 'job:' .. jobId
