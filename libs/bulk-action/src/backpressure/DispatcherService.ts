@@ -1,3 +1,4 @@
+import { setTimeout } from 'timers/promises';
 import { Injectable, Inject, Logger, OnModuleDestroy } from '@nestjs/common';
 import { RedisService } from '@app/redis/RedisService';
 import {
@@ -10,8 +11,14 @@ import { ReadyQueueService } from './ReadyQueueService';
 @Injectable()
 export class DispatcherService implements OnModuleDestroy {
   private readonly logger = new Logger(DispatcherService.name);
-  private intervalHandle: ReturnType<typeof setInterval> | null = null;
-  private isRunning = false;
+  private abortController: AbortController | null = null;
+  private dispatching = false;
+
+  private stats = {
+    totalMoved: 0,
+    totalCycles: 0,
+    totalSkipped: 0,
+  };
 
   constructor(
     private readonly redisService: RedisService,
@@ -25,16 +32,13 @@ export class DispatcherService implements OnModuleDestroy {
   }
 
   start(): void {
-    if (this.intervalHandle) {
+    if (this.abortController) {
       return;
     }
 
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    this.intervalHandle = setInterval(
-      () => void this.dispatch(),
-      this.config.backpressure.dispatchIntervalMs,
-    );
+    this.abortController = new AbortController();
+
+    void this.runLoop();
 
     this.logger.log(
       `Dispatcher started (interval=${this.config.backpressure.dispatchIntervalMs}ms)`,
@@ -42,27 +46,60 @@ export class DispatcherService implements OnModuleDestroy {
   }
 
   stop(): void {
-    if (this.intervalHandle) {
-      clearInterval(this.intervalHandle);
-      this.intervalHandle = null;
-      this.logger.log('Dispatcher stopped');
-    }
+    this.abortController?.abort();
+    this.abortController = null;
+    this.logger.log('Dispatcher stopped');
+  }
+
+  isRunning(): boolean {
+    return this.abortController !== null;
+  }
+
+  getStats(): {
+    totalMoved: number;
+    totalCycles: number;
+    totalSkipped: number;
+  } {
+    return { ...this.stats };
   }
 
   async dispatchOnce(): Promise<number> {
     return this.dispatch();
   }
 
+  private async runLoop(): Promise<void> {
+    const signal = this.abortController?.signal;
+
+    while (!signal?.aborted) {
+      await this.dispatch();
+
+      try {
+        await setTimeout(
+          this.config.backpressure.dispatchIntervalMs,
+          undefined,
+          {
+            signal,
+          },
+        );
+      } catch {
+        break;
+      }
+    }
+  }
+
   private async dispatch(): Promise<number> {
-    if (this.isRunning) {
+    if (this.dispatching) {
       return 0;
     }
-    this.isRunning = true;
+    this.dispatching = true;
 
     try {
+      this.stats.totalCycles++;
+
       const hasCapacity = await this.readyQueue.hasCapacity();
 
       if (!hasCapacity) {
+        this.stats.totalSkipped++;
         this.logger.debug('Ready Queue full, skipping dispatch');
 
         return 0;
@@ -71,6 +108,7 @@ export class DispatcherService implements OnModuleDestroy {
       const moved = await this.moveToReady();
 
       if (moved > 0) {
+        this.stats.totalMoved += moved;
         this.logger.debug(
           `Dispatched ${moved} jobs from Non-ready -> Ready Queue`,
         );
@@ -85,7 +123,7 @@ export class DispatcherService implements OnModuleDestroy {
 
       return 0;
     } finally {
-      this.isRunning = false;
+      this.dispatching = false;
     }
   }
 
