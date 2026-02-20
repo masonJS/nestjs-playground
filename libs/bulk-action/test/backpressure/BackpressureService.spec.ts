@@ -14,7 +14,10 @@ import {
 import { RateLimiterService } from '@app/bulk-action/backpressure/RateLimiterService';
 import { ReadyQueueService } from '@app/bulk-action/backpressure/ReadyQueueService';
 import { NonReadyQueueService } from '@app/bulk-action/backpressure/NonReadyQueueService';
-import { BackpressureService } from '@app/bulk-action/backpressure/BackpressureService';
+import {
+  BackpressureDestination,
+  BackpressureService,
+} from '@app/bulk-action/backpressure/BackpressureService';
 import { CongestionControlService } from '@app/bulk-action/congestion/CongestionControlService';
 import { Job, JobStatus } from '@app/bulk-action/model/Job';
 
@@ -115,7 +118,7 @@ describe('BackpressureService', () => {
 
       // then
       expect(result.accepted).toBe(true);
-      expect(result.destination).toBe('ready');
+      expect(result.destination).toBe(BackpressureDestination.READY);
       expect(await readyQueue.size()).toBe(1);
     });
 
@@ -132,7 +135,7 @@ describe('BackpressureService', () => {
 
       // then
       expect(result.accepted).toBe(true);
-      expect(result.destination).toBe('non-ready');
+      expect(result.destination).toBe(BackpressureDestination.NON_READY);
       expect(result.reason).toContain('Rate limited');
       expect(await nonReadyQueue.size()).toBe(1);
     });
@@ -150,7 +153,7 @@ describe('BackpressureService', () => {
 
       // then
       expect(result.accepted).toBe(false);
-      expect(result.destination).toBe('rejected');
+      expect(result.destination).toBe(BackpressureDestination.REJECTED);
     });
 
     it('다른 고객사 간 Rate Limit이 분배된다', async () => {
@@ -168,7 +171,7 @@ describe('BackpressureService', () => {
       );
 
       // then
-      expect(result.destination).toBe('non-ready');
+      expect(result.destination).toBe(BackpressureDestination.NON_READY);
     });
   });
 

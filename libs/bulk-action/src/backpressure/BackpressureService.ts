@@ -4,9 +4,15 @@ import { ReadyQueueService } from './ReadyQueueService';
 import { CongestionControlService } from '../congestion/CongestionControlService';
 import { Job } from '../model/Job';
 
+export enum BackpressureDestination {
+  READY = 'ready',
+  NON_READY = 'non-ready',
+  REJECTED = 'rejected',
+}
+
 export interface BackpressureResult {
   accepted: boolean;
-  destination: 'ready' | 'non-ready' | 'rejected';
+  destination: BackpressureDestination;
   reason?: string;
 }
 
@@ -24,7 +30,7 @@ export class BackpressureService {
     if (!hasCapacity) {
       return {
         accepted: false,
-        destination: 'rejected',
+        destination: BackpressureDestination.REJECTED,
         reason: 'Ready Queue at capacity',
       };
     }
@@ -37,12 +43,12 @@ export class BackpressureService {
       if (!pushed) {
         return {
           accepted: false,
-          destination: 'rejected',
+          destination: BackpressureDestination.REJECTED,
           reason: 'Ready Queue became full',
         };
       }
 
-      return { accepted: true, destination: 'ready' };
+      return { accepted: true, destination: BackpressureDestination.READY };
     }
 
     const backoffResult = await this.congestionControl.addToNonReady(
@@ -52,7 +58,7 @@ export class BackpressureService {
 
     return {
       accepted: true,
-      destination: 'non-ready',
+      destination: BackpressureDestination.NON_READY,
       reason:
         `Rate limited (global: ${rateLimitResult.globalCount}/${rateLimitResult.globalLimit}, ` +
         `group: ${rateLimitResult.groupCount}/${rateLimitResult.perGroupLimit}, ` +
