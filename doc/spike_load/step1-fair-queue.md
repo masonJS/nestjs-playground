@@ -461,7 +461,7 @@ libs/bulk-action/
 │   └── model/
 │       ├── Job.ts                        # Job 인터페이스
 │       ├── JobGroup.ts                   # JobGroup 인터페이스
-│       ├── JobResult.ts                  # 작업 결과 인터페이스 (Step 4 Worker 연동)
+│       ├── JobProcessorResponse.ts                  # 작업 결과 인터페이스 (Step 4 Worker 연동)
 │       └── EnqueueOptions.ts             # Enqueue 옵션 타입
 ├── test/
 └── tsconfig.lib.json
@@ -606,13 +606,13 @@ export interface EnqueueOptions {
 }
 ```
 
-**`model/JobResult.ts`**
+**`model/JobProcessorResponse.ts`**
 
 > Step 4 Worker에서 작업 처리 결과를 표현하기 위한 인터페이스이다.
 > `ack()` 호출 시 성공/실패 판별과 재시도 여부 결정에 사용된다.
 
 ```typescript
-export interface JobResult {
+export interface JobProcessorResponse {
   jobId: string;
   groupId: string;
   success: boolean;
@@ -1528,7 +1528,7 @@ BulkActionModule에 RedisModule.register() import 추가.
 이슈: [Major] 디렉토리 구조가 실제 파일명·구성과 불일치
 수정 내용: PascalCase 파일명으로 갱신(BulkActionModule.ts 등).
 존재하지 않는 index.ts, fair-queue.constants.ts, redis/redis.provider.ts
-삭제. key/RedisKeyBuilder.ts, model/JobResult.ts 추가.
+삭제. key/RedisKeyBuilder.ts, model/JobProcessorResponse.ts 추가.
 ────────────────────────────────────────
 #: 21
 이슈: [Major] FairQueueService의 onModuleDestroy 불필요
@@ -1542,9 +1542,9 @@ RedisKeyBuilder 서비스로 교체. 코드 블록 및 Redis Provider 섹션을
 Redis 키 빌더 섹션으로 변경.
 ────────────────────────────────────────
 #: 23
-이슈: [Minor] JobGroupHash 타입 및 JobResult 인터페이스 누락
+이슈: [Minor] JobGroupHash 타입 및 JobProcessorResponse 인터페이스 누락
 수정 내용: JobGroup 모델에 JobGroupHash 유틸리티 타입 추가.
-model/JobResult.ts 인터페이스를 모델 정의 섹션에 추가.
+model/JobProcessorResponse.ts 인터페이스를 모델 정의 섹션에 추가.
 ────────────────────────────────────────
 #: 24
 이슈: [Major] sjfBoost 부호 전환(-→+)에 따른 ALPHA 의미 역전 및 ZRANGE/ZREVRANGE 불일치
