@@ -1,13 +1,13 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
 import { RedisService } from '@app/redis/RedisService';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { PriorityLevel } from '@app/bulk-action/model/job-group/type/PriorityLevel';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
 } from '../config/BulkActionConfig';
 import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
-import { EnqueueOptions } from '../model/EnqueueOptions';
-import { Job, JobStatus } from '../model/Job';
-import { PriorityLevel } from '../model/JobGroup';
+import { BulkActionRequest } from '../model/BulkActionRequest';
+import { Job } from '../model/job/Job';
 
 export interface QueueStats {
   highPriorityGroups: number;
@@ -26,11 +26,11 @@ export class FairQueueService {
     private readonly keys: RedisKeyBuilder,
   ) {}
 
-  async enqueue(options: EnqueueOptions): Promise<void> {
+  async enqueue(options: BulkActionRequest): Promise<void> {
     const {
       groupId,
       jobId,
-      type,
+      jobProcessorType,
       payload,
       basePriority = 0,
       priorityLevel = PriorityLevel.NORMAL,
@@ -50,7 +50,7 @@ export class FairQueueService {
       basePriority.toString(),
       priorityLevel,
       this.config.fairQueue.alpha.toString(),
-      type,
+      jobProcessorType,
     ];
 
     try {
@@ -137,14 +137,6 @@ export class FairQueueService {
       map[raw[i]] = raw[i + 1];
     }
 
-    return {
-      id: map.id,
-      groupId: map.groupId,
-      type: map.type ?? '',
-      payload: map.payload ?? '{}',
-      status: (map.status as JobStatus) ?? JobStatus.PENDING,
-      retryCount: parseInt(map.retryCount ?? '0', 10),
-      createdAt: parseInt(map.createdAt ?? '0', 10),
-    };
+    return new Job(map);
   }
 }

@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { PriorityLevel } from '@app/bulk-action/model/job-group/type/PriorityLevel';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
 } from '../config/BulkActionConfig';
-import { PriorityLevel } from '../model/JobGroup';
 
 @Injectable()
 export class RedisKeyBuilder {
@@ -74,5 +74,11 @@ export class RedisKeyBuilder {
 
   congestionCompletedCount(groupId: string): string {
     return `${this.prefix}congestion:${groupId}:completed-count`;
+  }
+
+  // ── Worker Pool ──
+
+  deadLetterQueue(): string {
+    return `${this.prefix}dead-letter-queue`;
   }
 }

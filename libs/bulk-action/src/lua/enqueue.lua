@@ -9,7 +9,7 @@ local payload       = ARGV[3]
 local basePriority  = tonumber(ARGV[4])
 local priorityLevel = ARGV[5]
 local alpha         = tonumber(ARGV[6])
-local jobType       = ARGV[7]
+local jobProcessorType = ARGV[7]
 
 local now = redis.call('TIME')
 local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
@@ -18,7 +18,7 @@ local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 redis.call('HSET', jobDataKey,
   'id', jobId,
   'groupId', groupId,
-  'type', jobType,
+  'processorType', jobProcessorType,
   'payload', payload,
   'status', 'PENDING',
   'retryCount', '0',
