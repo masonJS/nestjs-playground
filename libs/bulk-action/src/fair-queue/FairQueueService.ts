@@ -28,7 +28,7 @@ export class FairQueueService {
 
   async enqueue(options: BulkActionRequest): Promise<void> {
     const {
-      groupId,
+      jobGroupId,
       jobId,
       jobProcessorType,
       payload,
@@ -38,13 +38,13 @@ export class FairQueueService {
 
     const keys = [
       this.keys.fairQueue(priorityLevel),
-      this.keys.groupJobs(groupId),
-      this.keys.groupMeta(groupId),
+      this.keys.groupJobs(jobGroupId),
+      this.keys.groupMeta(jobGroupId),
       this.keys.job(jobId),
     ];
 
     const args = [
-      groupId,
+      jobGroupId,
       jobId,
       JSON.stringify(payload),
       basePriority.toString(),
@@ -57,7 +57,7 @@ export class FairQueueService {
       await this.redisService.callCommand('enqueue', keys, args);
 
       this.logger.debug(
-        `Enqueued job ${jobId} for group ${groupId} at ${priorityLevel} priority`,
+        `Enqueued job ${jobId} for group ${jobGroupId} at ${priorityLevel} priority`,
       );
     } catch (error) {
       this.logger.error(

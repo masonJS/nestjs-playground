@@ -1,14 +1,12 @@
 import { setTimeout } from 'timers/promises';
 import { Injectable, Inject, Logger, OnModuleDestroy } from '@nestjs/common';
+import { BackpressureDestination } from '@app/bulk-action/backpressure/dto/BackpressureDto';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
 } from '../config/BulkActionConfig';
 import { FairQueueService } from '../fair-queue/FairQueueService';
-import {
-  BackpressureDestination,
-  BackpressureService,
-} from '../backpressure/BackpressureService';
+import { BackpressureService } from '../backpressure/BackpressureService';
 import { ReadyQueueService } from '../backpressure/ReadyQueueService';
 
 export interface FetcherStats extends Record<string, number> {
@@ -70,8 +68,6 @@ export class FetcherService implements OnModuleDestroy {
   getStats(): FetcherStats {
     return { ...this.stats };
   }
-
-  // --- Private ---
 
   private async runLoop(): Promise<void> {
     const signal = this.abortController?.signal;

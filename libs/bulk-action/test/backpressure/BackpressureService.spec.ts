@@ -20,18 +20,6 @@ import { Job } from '@app/bulk-action/model/job/Job';
 import { JobStatus } from '@app/bulk-action/model/job/type/JobStatus';
 import { BackpressureDestination } from '@app/bulk-action/backpressure/dto/BackpressureDto';
 
-function createMockJob(id: string, groupId: string): Job {
-  return {
-    id,
-    groupId,
-    processorType: 'TEST',
-    payload: '{}',
-    status: JobStatus.PENDING,
-    retryCount: 0,
-    createdAt: Date.now(),
-  };
-}
-
 describe('BackpressureService', () => {
   let module: TestingModule;
   let backpressure: BackpressureService;
@@ -193,3 +181,15 @@ describe('BackpressureService', () => {
     });
   });
 });
+
+function createMockJob(id: string, groupId: string): Job {
+  return {
+    id,
+    groupId,
+    processorType: 'TEST',
+    payload: {},
+    status: JobStatus.PENDING,
+    retryCount: 0,
+    createdAt: Date.now(),
+  };
+}

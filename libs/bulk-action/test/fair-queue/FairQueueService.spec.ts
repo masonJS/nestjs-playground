@@ -86,7 +86,7 @@ describe('FairQueueService', () => {
 
       // when
       await service.enqueue({
-        groupId,
+        jobGroupId: groupId,
         jobId,
         jobProcessorType: 'SEND_PROMOTION',
         payload,
@@ -107,13 +107,13 @@ describe('FairQueueService', () => {
     it('그룹 작업 목록에 jobId가 추가된다', async () => {
       // when
       await service.enqueue({
-        groupId: 'group-1',
+        jobGroupId: 'group-1',
         jobId: 'job-1',
         jobProcessorType: 'SEND',
         payload: {},
       });
       await service.enqueue({
-        groupId: 'group-1',
+        jobGroupId: 'group-1',
         jobId: 'job-2',
         jobProcessorType: 'SEND',
         payload: {},
@@ -131,7 +131,7 @@ describe('FairQueueService', () => {
     it('그룹 메타데이터가 생성된다', async () => {
       // when
       await service.enqueue({
-        groupId: 'group-1',
+        jobGroupId: 'group-1',
         jobId: 'job-1',
         jobProcessorType: 'SEND',
         payload: {},
@@ -153,13 +153,13 @@ describe('FairQueueService', () => {
     it('같은 그룹에 작업 추가 시 totalJobs가 증가한다', async () => {
       // when
       await service.enqueue({
-        groupId: 'group-1',
+        jobGroupId: 'group-1',
         jobId: 'job-1',
         jobProcessorType: 'SEND',
         payload: {},
       });
       await service.enqueue({
-        groupId: 'group-1',
+        jobGroupId: 'group-1',
         jobId: 'job-2',
         jobProcessorType: 'SEND',
         payload: {},
@@ -176,7 +176,7 @@ describe('FairQueueService', () => {
     it('그룹이 해당 priority 큐의 sorted set에 등록된다', async () => {
       // when
       await service.enqueue({
-        groupId: 'group-1',
+        jobGroupId: 'group-1',
         jobId: 'job-1',
         jobProcessorType: 'SEND',
         payload: {},
@@ -195,14 +195,14 @@ describe('FairQueueService', () => {
     it('서로 다른 priority 큐에 그룹이 분리된다', async () => {
       // when
       await service.enqueue({
-        groupId: 'group-high',
+        jobGroupId: 'group-high',
         jobId: 'job-1',
         jobProcessorType: 'SEND',
         payload: {},
         priorityLevel: PriorityLevel.HIGH,
       });
       await service.enqueue({
-        groupId: 'group-low',
+        jobGroupId: 'group-low',
         jobId: 'job-2',
         jobProcessorType: 'SEND',
         payload: {},
@@ -222,7 +222,7 @@ describe('FairQueueService', () => {
       // given
       const payload = { message: 'hello' };
       await service.enqueue({
-        groupId: 'group-1',
+        jobGroupId: 'group-1',
         jobId: 'job-1',
         jobProcessorType: 'SEND',
         payload,
@@ -236,21 +236,21 @@ describe('FairQueueService', () => {
       expect(result.id).toBe('job-1');
       expect(result.groupId).toBe('group-1');
       expect(result.processorType).toBe('SEND');
-      expect(JSON.parse(result.payload)).toEqual(payload);
+      expect(result.payload).toEqual(payload);
       expect(result.status).toBe(JobStatus.PROCESSING);
     });
 
     it('HIGH 그룹이 NORMAL보다 먼저 dequeue된다', async () => {
       // given
       await service.enqueue({
-        groupId: 'group-normal',
+        jobGroupId: 'group-normal',
         jobId: 'job-normal',
         jobProcessorType: 'SEND',
         payload: {},
         priorityLevel: PriorityLevel.NORMAL,
       });
       await service.enqueue({
-        groupId: 'group-high',
+        jobGroupId: 'group-high',
         jobId: 'job-high',
         jobProcessorType: 'SEND',
         payload: {},
@@ -375,13 +375,13 @@ describe('FairQueueService', () => {
     it('모든 작업 ack 시 그룹 완료를 반환한다', async () => {
       // given
       await service.enqueue({
-        groupId: 'group-1',
+        jobGroupId: 'group-1',
         jobId: 'job-1',
         jobProcessorType: 'SEND',
         payload: {},
       });
       await service.enqueue({
-        groupId: 'group-1',
+        jobGroupId: 'group-1',
         jobId: 'job-2',
         jobProcessorType: 'SEND',
         payload: {},
@@ -410,7 +410,7 @@ describe('FairQueueService', () => {
 
   async function enqueueJob(groupId: string, jobId: string): Promise<void> {
     await service.enqueue({
-      groupId,
+      jobGroupId: groupId,
       jobId,
       jobProcessorType: 'SEND',
       payload: {},

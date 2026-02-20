@@ -23,6 +23,12 @@ import { CongestionStatsService } from './congestion/CongestionStatsService';
 import { FairQueueService } from './fair-queue/FairQueueService';
 import { RedisKeyBuilder } from './key/RedisKeyBuilder';
 import { LuaScriptLoader } from './lua/LuaScriptLoader';
+import { BulkActionService } from './BulkActionService';
+import { EmailProcessor } from './processor/EmailProcessor';
+import { PushNotificationProcessor } from './processor/PushNotificationProcessor';
+import { FetcherService } from './worker-pool/FetcherService';
+import { JOB_PROCESSOR } from './model/job-processor/JobProcessor';
+import { WorkerPoolService } from './worker-pool/WorkerPoolService';
 
 @Module({})
 export class BulkActionModule {
@@ -79,13 +85,43 @@ export class BulkActionModule {
         BackpressureService,
         CongestionControlService,
         CongestionStatsService,
+        FetcherService,
+        WorkerPoolService,
+        BulkActionService,
+        EmailProcessor,
+        PushNotificationProcessor,
+        {
+          provide: JOB_PROCESSOR,
+          useFactory: (
+            email: EmailProcessor,
+            push: PushNotificationProcessor,
+          ) => [email, push],
+          inject: [EmailProcessor, PushNotificationProcessor],
+        },
       ],
       exports: [
+        BulkActionService,
         FairQueueService,
         BackpressureService,
         ReadyQueueService,
         CongestionControlService,
+        WorkerPoolService,
       ],
+    };
+  }
+
+  static registerProcessors(processors: any[]): DynamicModule {
+    return {
+      module: BulkActionModule,
+      providers: [
+        {
+          provide: JOB_PROCESSOR,
+          useFactory: (...instances: any[]) => instances,
+          inject: processors,
+        },
+        ...processors,
+      ],
+      exports: [JOB_PROCESSOR],
     };
   }
 }

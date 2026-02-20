@@ -62,9 +62,9 @@ describe('FetcherService (Integration)', () => {
     // given
     for (let i = 0; i < 5; i++) {
       await fairQueue.enqueue({
-        groupId: 'customer-A',
+        jobGroupId: 'customer-A',
         jobId: `job-${i}`,
-        type: 'TEST',
+        jobProcessorType: 'TEST',
         payload: {},
       });
     }
@@ -83,9 +83,9 @@ describe('FetcherService (Integration)', () => {
     // given — 20개 작업 등록 (readyQueueMaxSize=10)
     for (let i = 0; i < 20; i++) {
       await fairQueue.enqueue({
-        groupId: 'customer-A',
+        jobGroupId: 'customer-A',
         jobId: `job-${i}`,
-        type: 'TEST',
+        jobProcessorType: 'TEST',
         payload: {},
       });
     }
