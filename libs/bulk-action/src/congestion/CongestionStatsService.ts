@@ -1,17 +1,11 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { RedisService } from '@app/redis/RedisService';
+import { CongestionSnapshot } from '@app/bulk-action/congestion/dto/CongestionSnapshotDto';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
 } from '../config/BulkActionConfig';
 import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
-
-export interface CongestionSnapshot {
-  nonReadyCount: number;
-  rateLimitSpeed: number;
-  backoffMs: number;
-  timestamp: number;
-}
 
 @Injectable()
 export class CongestionStatsService {

@@ -5,12 +5,7 @@ import {
   BulkActionConfig,
 } from '../config/BulkActionConfig';
 import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
-
-export enum NonReadyReason {
-  RATE_LIMITED = 'RATE_LIMITED',
-  API_THROTTLED = 'API_THROTTLED',
-  TRANSIENT_ERROR = 'TRANSIENT_ERROR',
-}
+import { NonReadyReason } from '../model/NonReadyReason';
 
 @Injectable()
 export class NonReadyQueueService {

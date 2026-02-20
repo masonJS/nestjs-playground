@@ -1,15 +1,15 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import {
+  BackoffResponse,
+  CongestionLevel,
+} from '@app/bulk-action/congestion/dto/BackoffDto';
 import { RedisService } from '@app/redis/RedisService';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
 } from '../config/BulkActionConfig';
 import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
-import {
-  BackoffCalculator,
-  BackoffResult,
-  CongestionLevel,
-} from './BackoffCalculator';
+import { BackoffCalculator } from './BackoffCalculator';
 
 export interface GroupCongestionState {
   groupId: string;
@@ -35,7 +35,10 @@ export class CongestionControlService {
     private readonly keys: RedisKeyBuilder,
   ) {}
 
-  async addToNonReady(jobId: string, groupId: string): Promise<BackoffResult> {
+  async addToNonReady(
+    jobId: string,
+    groupId: string,
+  ): Promise<BackoffResponse> {
     if (!this.config.congestion.enabled) {
       return this.fixedBackoff(jobId, groupId);
     }
@@ -162,7 +165,7 @@ export class CongestionControlService {
   private async fixedBackoff(
     jobId: string,
     groupId: string,
-  ): Promise<BackoffResult> {
+  ): Promise<BackoffResponse> {
     const backoffMs = this.config.congestion.baseBackoffMs;
     const executeAt = Date.now() + backoffMs;
 
@@ -176,11 +179,6 @@ export class CongestionControlService {
       `Job ${jobId} -> Non-ready fixed backoff (group=${groupId}, backoff=${backoffMs}ms)`,
     );
 
-    return {
-      backoffMs,
-      nonReadyCount: 0,
-      rateLimitSpeed: 0,
-      congestionLevel: CongestionLevel.NONE,
-    };
+    return BackoffResponse.fixedBackoff(backoffMs);
   }
 }

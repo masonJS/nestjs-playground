@@ -1,27 +1,11 @@
-export enum CongestionLevel {
-  NONE = 'NONE',
-  LOW = 'LOW',
-  MODERATE = 'MODERATE',
-  HIGH = 'HIGH',
-  CRITICAL = 'CRITICAL',
-}
-
-export interface BackoffParams {
-  nonReadyCount: number;
-  rateLimitSpeed: number;
-  baseBackoffMs: number;
-  maxBackoffMs: number;
-}
-
-export interface BackoffResult {
-  backoffMs: number;
-  nonReadyCount: number;
-  rateLimitSpeed: number;
-  congestionLevel: CongestionLevel;
-}
+import {
+  BackoffRequest,
+  BackoffResponse,
+  CongestionLevel,
+} from '@app/bulk-action/congestion/dto/BackoffDto';
 
 export class BackoffCalculator {
-  static calculate(params: BackoffParams): BackoffResult {
+  static calculate(params: BackoffRequest): BackoffResponse {
     const { nonReadyCount, rateLimitSpeed, baseBackoffMs, maxBackoffMs } =
       params;
     const safeSpeed = Math.max(1, rateLimitSpeed);
@@ -31,12 +15,12 @@ export class BackoffCalculator {
       maxBackoffMs,
     );
 
-    return {
+    return BackoffResponse.calculate(
       backoffMs,
       nonReadyCount,
-      rateLimitSpeed: safeSpeed,
-      congestionLevel: BackoffCalculator.classify(backoffMs, baseBackoffMs),
-    };
+      safeSpeed,
+      BackoffCalculator.classify(backoffMs, baseBackoffMs),
+    );
   }
 
   static classify(backoffMs: number, baseBackoffMs: number): CongestionLevel {
