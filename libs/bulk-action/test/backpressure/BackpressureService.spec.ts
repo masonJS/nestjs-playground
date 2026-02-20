@@ -14,18 +14,17 @@ import {
 import { RateLimiterService } from '@app/bulk-action/backpressure/RateLimiterService';
 import { ReadyQueueService } from '@app/bulk-action/backpressure/ReadyQueueService';
 import { NonReadyQueueService } from '@app/bulk-action/backpressure/NonReadyQueueService';
-import {
-  BackpressureDestination,
-  BackpressureService,
-} from '@app/bulk-action/backpressure/BackpressureService';
+import { BackpressureService } from '@app/bulk-action/backpressure/BackpressureService';
 import { CongestionControlService } from '@app/bulk-action/congestion/CongestionControlService';
-import { Job, JobStatus } from '@app/bulk-action/model/Job';
+import { Job } from '@app/bulk-action/model/job/Job';
+import { JobStatus } from '@app/bulk-action/model/job/type/JobStatus';
+import { BackpressureDestination } from '@app/bulk-action/backpressure/dto/BackpressureDto';
 
 function createMockJob(id: string, groupId: string): Job {
   return {
     id,
     groupId,
-    type: 'TEST',
+    processorType: 'TEST',
     payload: '{}',
     status: JobStatus.PENDING,
     retryCount: 0,
@@ -178,7 +177,7 @@ describe('BackpressureService', () => {
   describe('requeue', () => {
     it('실패한 작업을 Non-ready Queue에 재등록한다', async () => {
       // when
-      await backpressure.requeue('job-fail', 'customer-A', 0);
+      await backpressure.requeue('job-fail', 'customer-A');
 
       // then
       expect(await nonReadyQueue.size()).toBe(1);
@@ -186,8 +185,8 @@ describe('BackpressureService', () => {
 
     it('여러 작업 requeue 시 Non-ready Queue에 모두 등록된다', async () => {
       // when
-      await backpressure.requeue('job-fail-0', 'customer-A', 0);
-      await backpressure.requeue('job-fail-3', 'customer-A', 3);
+      await backpressure.requeue('job-fail-0', 'customer-A');
+      await backpressure.requeue('job-fail-3', 'customer-A');
 
       // then
       expect(await nonReadyQueue.size()).toBe(2);

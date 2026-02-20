@@ -12,7 +12,7 @@ import {
   DEFAULT_WORKER_POOL_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { CongestionControlService } from '@app/bulk-action/congestion/CongestionControlService';
-import { CongestionLevel } from '@app/bulk-action/congestion/BackoffCalculator';
+import { CongestionLevel } from '@app/bulk-action/congestion/dto/BackoffDto';
 
 describe('CongestionControlService', () => {
   let module: TestingModule;

@@ -13,10 +13,8 @@ import {
   DEFAULT_WORKER_POOL_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { ReadyQueueService } from '@app/bulk-action/backpressure/ReadyQueueService';
-import {
-  NonReadyQueueService,
-  NonReadyReason,
-} from '@app/bulk-action/backpressure/NonReadyQueueService';
+import { NonReadyQueueService } from '@app/bulk-action/backpressure/NonReadyQueueService';
+import { NonReadyReason } from '@app/bulk-action/model/NonReadyReason';
 import { DispatcherService } from '@app/bulk-action/backpressure/DispatcherService';
 
 describe('DispatcherService', () => {

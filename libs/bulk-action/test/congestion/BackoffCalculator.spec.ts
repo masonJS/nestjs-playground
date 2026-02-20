@@ -1,7 +1,5 @@
-import {
-  BackoffCalculator,
-  CongestionLevel,
-} from '@app/bulk-action/congestion/BackoffCalculator';
+import { BackoffCalculator } from '@app/bulk-action/congestion/BackoffCalculator';
+import { CongestionLevel } from '@app/bulk-action/congestion/dto/BackoffDto';
 
 describe('BackoffCalculator', () => {
   describe('calculate', () => {

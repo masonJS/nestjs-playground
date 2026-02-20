@@ -11,10 +11,8 @@ import {
   DEFAULT_WORKER_POOL_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
-import {
-  NonReadyQueueService,
-  NonReadyReason,
-} from '@app/bulk-action/backpressure/NonReadyQueueService';
+import { NonReadyQueueService } from '@app/bulk-action/backpressure/NonReadyQueueService';
+import { NonReadyReason } from '@app/bulk-action/model/NonReadyReason';
 
 describe('NonReadyQueueService', () => {
   let module: TestingModule;

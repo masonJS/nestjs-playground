@@ -12,8 +12,9 @@ import {
   DEFAULT_CONGESTION_CONFIG,
   DEFAULT_WORKER_POOL_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
-import { JobStatus } from '@app/bulk-action/model/Job';
-import { PriorityLevel, JobGroupHash } from '@app/bulk-action/model/JobGroup';
+import { JobGroupHash } from '@app/bulk-action/model/job-group/JobGroup';
+import { JobStatus } from '@app/bulk-action/model/job/type/JobStatus';
+import { PriorityLevel } from '@app/bulk-action/model/job-group/type/PriorityLevel';
 import { expectNonNullable } from '../../../web-common/test/unit/expectNonNullable';
 
 describe('FairQueueService', () => {
@@ -87,7 +88,7 @@ describe('FairQueueService', () => {
       await service.enqueue({
         groupId,
         jobId,
-        type: 'SEND_PROMOTION',
+        jobProcessorType: 'SEND_PROMOTION',
         payload,
       });
 
@@ -97,7 +98,7 @@ describe('FairQueueService', () => {
       );
       expect(result.id).toBe(jobId);
       expect(result.groupId).toBe(groupId);
-      expect(result.type).toBe('SEND_PROMOTION');
+      expect(result.processorType).toBe('SEND_PROMOTION');
       expect(JSON.parse(result.payload)).toEqual(payload);
       expect(result.status).toBe(JobStatus.PENDING);
       expect(Number(result.createdAt)).toBeGreaterThan(0);
@@ -108,13 +109,13 @@ describe('FairQueueService', () => {
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
       });
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-2',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
       });
 
@@ -132,7 +133,7 @@ describe('FairQueueService', () => {
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
         basePriority: 100,
         priorityLevel: PriorityLevel.HIGH,
@@ -154,13 +155,13 @@ describe('FairQueueService', () => {
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
       });
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-2',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
       });
 
@@ -177,7 +178,7 @@ describe('FairQueueService', () => {
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
         priorityLevel: PriorityLevel.HIGH,
       });
@@ -196,14 +197,14 @@ describe('FairQueueService', () => {
       await service.enqueue({
         groupId: 'group-high',
         jobId: 'job-1',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
         priorityLevel: PriorityLevel.HIGH,
       });
       await service.enqueue({
         groupId: 'group-low',
         jobId: 'job-2',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
         priorityLevel: PriorityLevel.LOW,
       });
@@ -223,7 +224,7 @@ describe('FairQueueService', () => {
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload,
       });
 
@@ -234,7 +235,7 @@ describe('FairQueueService', () => {
       expectNonNullable(result);
       expect(result.id).toBe('job-1');
       expect(result.groupId).toBe('group-1');
-      expect(result.type).toBe('SEND');
+      expect(result.processorType).toBe('SEND');
       expect(JSON.parse(result.payload)).toEqual(payload);
       expect(result.status).toBe(JobStatus.PROCESSING);
     });
@@ -244,14 +245,14 @@ describe('FairQueueService', () => {
       await service.enqueue({
         groupId: 'group-normal',
         jobId: 'job-normal',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
         priorityLevel: PriorityLevel.NORMAL,
       });
       await service.enqueue({
         groupId: 'group-high',
         jobId: 'job-high',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
         priorityLevel: PriorityLevel.HIGH,
       });
@@ -376,13 +377,13 @@ describe('FairQueueService', () => {
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-1',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
       });
       await service.enqueue({
         groupId: 'group-1',
         jobId: 'job-2',
-        type: 'SEND',
+        jobProcessorType: 'SEND',
         payload: {},
       });
 
@@ -408,6 +409,11 @@ describe('FairQueueService', () => {
   });
 
   async function enqueueJob(groupId: string, jobId: string): Promise<void> {
-    await service.enqueue({ groupId, jobId, type: 'SEND', payload: {} });
+    await service.enqueue({
+      groupId,
+      jobId,
+      jobProcessorType: 'SEND',
+      payload: {},
+    });
   }
 });
