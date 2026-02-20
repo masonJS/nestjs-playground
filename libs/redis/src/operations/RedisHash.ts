@@ -14,4 +14,12 @@ export class RedisHash {
   async set(key: string, field: string, value: string): Promise<number> {
     return this.client.hset(key, field, value);
   }
+
+  async incrementBy(
+    key: string,
+    field: string,
+    increment: number,
+  ): Promise<number> {
+    return this.client.hincrby(key, field, increment);
+  }
 }
