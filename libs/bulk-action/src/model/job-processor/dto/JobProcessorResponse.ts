@@ -9,4 +9,5 @@ export interface JobProcessorResponse {
     retryable: boolean;
   };
   durationMs: number;
+  processorType?: string;
 }
