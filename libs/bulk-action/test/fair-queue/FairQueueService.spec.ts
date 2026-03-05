@@ -1,20 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Configuration } from '@app/config/Configuration';
 import { RedisModule } from '@app/redis/RedisModule';
 import { RedisService } from '@app/redis/RedisService';
 import { FairQueueService } from '@app/bulk-action/fair-queue/FairQueueService';
 import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
 import { LuaScriptLoader } from '@app/bulk-action/lua/LuaScriptLoader';
-import {
-  BULK_ACTION_CONFIG,
-  BulkActionConfig,
-  DEFAULT_BACKPRESSURE_CONFIG,
-  DEFAULT_CONGESTION_CONFIG,
-  DEFAULT_WORKER_POOL_CONFIG,
-} from '@app/bulk-action/config/BulkActionConfig';
+import { BULK_ACTION_CONFIG } from '@app/bulk-action/config/BulkActionConfig';
 import { JobGroupHash } from '@app/bulk-action/model/job-group/JobGroup';
 import { JobStatus } from '@app/bulk-action/model/job/type/JobStatus';
 import { PriorityLevel } from '@app/bulk-action/model/job-group/type/PriorityLevel';
+import {
+  createTestBulkActionConfig,
+  TEST_KEY_PREFIX,
+} from '../TestBulkActionConfig';
 import { expectNonNullable } from '../../../web-common/test/unit/expectNonNullable';
 
 describe('FairQueueService', () => {
@@ -22,24 +19,7 @@ describe('FairQueueService', () => {
   let service: FairQueueService;
   let redisService: RedisService;
 
-  const KEY_PREFIX = 'test:';
-  const env = Configuration.getEnv();
-
-  const config: BulkActionConfig = {
-    redis: {
-      host: env.redis.host,
-      port: env.redis.port,
-      password: env.redis.password,
-      db: env.redis.db,
-      keyPrefix: KEY_PREFIX,
-    },
-    fairQueue: {
-      alpha: 10000,
-    },
-    backpressure: DEFAULT_BACKPRESSURE_CONFIG,
-    congestion: DEFAULT_CONGESTION_CONFIG,
-    workerPool: DEFAULT_WORKER_POOL_CONFIG,
-  };
+  const config = createTestBulkActionConfig();
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
@@ -94,7 +74,7 @@ describe('FairQueueService', () => {
 
       // then
       const result = await redisService.hash.getAll(
-        `${KEY_PREFIX}job:${jobId}`,
+        `${TEST_KEY_PREFIX}job:${jobId}`,
       );
       expect(result.id).toBe(jobId);
       expect(result.groupId).toBe(groupId);
@@ -121,7 +101,7 @@ describe('FairQueueService', () => {
 
       // then
       const result = await redisService.list.range(
-        `${KEY_PREFIX}group:group-1:jobs`,
+        `${TEST_KEY_PREFIX}group:group-1:jobs`,
         0,
         -1,
       );
@@ -141,7 +121,7 @@ describe('FairQueueService', () => {
 
       // then
       const result = (await redisService.hash.getAll(
-        `${KEY_PREFIX}group:group-1:meta`,
+        `${TEST_KEY_PREFIX}group:group-1:meta`,
       )) as unknown as JobGroupHash;
       expect(result.totalJobs).toBe('1');
       expect(result.doneJobs).toBe('0');
@@ -167,7 +147,7 @@ describe('FairQueueService', () => {
 
       // then
       const result = await redisService.hash.get(
-        `${KEY_PREFIX}group:group-1:meta`,
+        `${TEST_KEY_PREFIX}group:group-1:meta`,
         'totalJobs',
       );
       expect(result).toBe('2');
@@ -185,7 +165,7 @@ describe('FairQueueService', () => {
 
       // then
       const result = await redisService.sortedSet.range(
-        `${KEY_PREFIX}fair-queue:high`,
+        `${TEST_KEY_PREFIX}fair-queue:high`,
         0,
         -1,
       );
@@ -325,7 +305,7 @@ describe('FairQueueService', () => {
       // then - 에이징으로 인해 dequeue된 그룹의 -nowMs가 더 작아져 score 하락
       // range()는 score 오름차순이므로, 낮은 score인 firstGroup이 index 0
       const result = await redisService.sortedSet.range(
-        `${KEY_PREFIX}fair-queue:normal`,
+        `${TEST_KEY_PREFIX}fair-queue:normal`,
         0,
         -1,
       );
@@ -401,7 +381,7 @@ describe('FairQueueService', () => {
       expect(secondAck).toBe(true);
 
       const result = (await redisService.hash.getAll(
-        `${KEY_PREFIX}group:group-1:meta`,
+        `${TEST_KEY_PREFIX}group:group-1:meta`,
       )) as unknown as JobGroupHash;
       expect(result.status).toBe('AGGREGATING');
       expect(result.doneJobs).toBe('2');

@@ -1,5 +1,4 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Configuration } from '@app/config/Configuration';
 import { RedisModule } from '@app/redis/RedisModule';
 import { RedisService } from '@app/redis/RedisService';
 import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
@@ -7,12 +6,10 @@ import { LuaScriptLoader } from '@app/bulk-action/lua/LuaScriptLoader';
 import {
   BULK_ACTION_CONFIG,
   BulkActionConfig,
-  DEFAULT_BACKPRESSURE_CONFIG,
-  DEFAULT_FAIR_QUEUE_CONFIG,
-  DEFAULT_WORKER_POOL_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 import { CongestionControlService } from '@app/bulk-action/congestion/CongestionControlService';
 import { CongestionLevel } from '@app/bulk-action/congestion/dto/BackoffDto';
+import { createTestBulkActionConfig } from '../TestBulkActionConfig';
 
 describe('CongestionControlService', () => {
   let module: TestingModule;
@@ -20,30 +17,9 @@ describe('CongestionControlService', () => {
   let redisService: RedisService;
   let keys: RedisKeyBuilder;
 
-  const KEY_PREFIX = 'test:';
-  const env = Configuration.getEnv();
-
-  const config: BulkActionConfig = {
-    redis: {
-      host: env.redis.host,
-      port: env.redis.port,
-      password: env.redis.password,
-      db: env.redis.db,
-      keyPrefix: KEY_PREFIX,
-    },
-    fairQueue: DEFAULT_FAIR_QUEUE_CONFIG,
-    backpressure: {
-      ...DEFAULT_BACKPRESSURE_CONFIG,
-      globalRps: 10,
-    },
-    congestion: {
-      enabled: true,
-      baseBackoffMs: 1000,
-      maxBackoffMs: 120000,
-      statsRetentionMs: 3600000,
-    },
-    workerPool: DEFAULT_WORKER_POOL_CONFIG,
-  };
+  const config = createTestBulkActionConfig({
+    backpressure: { globalRps: 10 },
+  });
 
   beforeAll(async () => {
     module = await Test.createTestingModule({

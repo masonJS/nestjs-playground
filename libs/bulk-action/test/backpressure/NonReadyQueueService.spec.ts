@@ -1,49 +1,19 @@
 import { setTimeout } from 'node:timers/promises';
 import { Test, TestingModule } from '@nestjs/testing';
-import { Configuration } from '@app/config/Configuration';
 import { RedisModule } from '@app/redis/RedisModule';
 import { RedisService } from '@app/redis/RedisService';
-import {
-  BULK_ACTION_CONFIG,
-  BulkActionConfig,
-  DEFAULT_CONGESTION_CONFIG,
-  DEFAULT_FAIR_QUEUE_CONFIG,
-  DEFAULT_WORKER_POOL_CONFIG,
-} from '@app/bulk-action/config/BulkActionConfig';
+import { BULK_ACTION_CONFIG } from '@app/bulk-action/config/BulkActionConfig';
 import { RedisKeyBuilder } from '@app/bulk-action/key/RedisKeyBuilder';
 import { NonReadyQueueService } from '@app/bulk-action/backpressure/NonReadyQueueService';
 import { NonReadyReason } from '@app/bulk-action/model/NonReadyReason';
+import { createTestBulkActionConfig } from '../TestBulkActionConfig';
 
 describe('NonReadyQueueService', () => {
   let module: TestingModule;
   let service: NonReadyQueueService;
   let redisService: RedisService;
 
-  const KEY_PREFIX = 'test:';
-  const env = Configuration.getEnv();
-
-  const config: BulkActionConfig = {
-    redis: {
-      host: env.redis.host,
-      port: env.redis.port,
-      password: env.redis.password,
-      db: env.redis.db,
-      keyPrefix: KEY_PREFIX,
-    },
-    fairQueue: DEFAULT_FAIR_QUEUE_CONFIG,
-    backpressure: {
-      globalRps: 10000,
-      readyQueueMaxSize: 10000,
-      rateLimitWindowSec: 1,
-      rateLimitKeyTtlSec: 2,
-      dispatchIntervalMs: 100,
-      dispatchBatchSize: 100,
-      defaultBackoffMs: 1000,
-      maxBackoffMs: 60000,
-    },
-    congestion: DEFAULT_CONGESTION_CONFIG,
-    workerPool: DEFAULT_WORKER_POOL_CONFIG,
-  };
+  const config = createTestBulkActionConfig();
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
