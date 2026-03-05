@@ -81,4 +81,34 @@ export class RedisKeyBuilder {
   deadLetterQueue(): string {
     return `${this.prefix}dead-letter-queue`;
   }
+
+  // ── Aggregator ──
+
+  groupResult(groupId: string): string {
+    return `${this.prefix}group:${groupId}:result`;
+  }
+
+  groupJobResults(groupId: string): string {
+    return `${this.prefix}group:${groupId}:job-results`;
+  }
+
+  groupFailedDetails(groupId: string): string {
+    return `${this.prefix}group:${groupId}:failed-details`;
+  }
+
+  // ── Lock ──
+
+  groupTransitionLock(groupId: string): string {
+    return `${this.prefix}lock:group:${groupId}:transition`;
+  }
+
+  groupAggregationLock(groupId: string): string {
+    return `${this.prefix}lock:group:${groupId}:aggregation`;
+  }
+
+  // ── Watcher ──
+
+  watcherActiveGroups(): string {
+    return `${this.prefix}watcher:active-groups`;
+  }
 }

@@ -38,12 +38,28 @@ export interface WorkerPoolConfig {
   shutdownGracePeriodMs: number;
 }
 
+export interface AggregatorConfig {
+  resultRetentionMs: number;
+  failedDetailsMaxCount: number;
+}
+
+export interface WatcherConfig {
+  intervalMs: number;
+  groupTimeoutMs: number;
+  lockTtlMs: number;
+  lockRetryCount: number;
+  lockRetryDelayMs: number;
+  staleGroupThresholdMs: number;
+}
+
 export interface BulkActionConfig {
   redis: BulkActionRedisConfig;
   fairQueue: FairQueueConfig;
   backpressure: BackpressureConfig;
   congestion: CongestionConfig;
   workerPool: WorkerPoolConfig;
+  aggregator: AggregatorConfig;
+  watcher: WatcherConfig;
 }
 
 export const DEFAULT_FAIR_QUEUE_CONFIG: FairQueueConfig = {
@@ -76,4 +92,18 @@ export const DEFAULT_WORKER_POOL_CONFIG: WorkerPoolConfig = {
   jobTimeoutMs: 30000,
   maxRetryCount: 3,
   shutdownGracePeriodMs: 30000,
+};
+
+export const DEFAULT_AGGREGATOR_CONFIG: AggregatorConfig = {
+  resultRetentionMs: 86400000, // 24h
+  failedDetailsMaxCount: 1000,
+};
+
+export const DEFAULT_WATCHER_CONFIG: WatcherConfig = {
+  intervalMs: 5000,
+  groupTimeoutMs: 3600000, // 1h
+  lockTtlMs: 30000,
+  lockRetryCount: 3,
+  lockRetryDelayMs: 200,
+  staleGroupThresholdMs: 60000, // 1min
 };

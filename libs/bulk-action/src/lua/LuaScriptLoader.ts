@@ -16,6 +16,10 @@ export class LuaScriptLoader implements OnModuleInit {
     await this.loadScript('moveToReady', 'move-to-ready.lua', 2);
     await this.loadScript('congestionBackoff', 'congestion-backoff.lua', 4);
     await this.loadScript('congestionRelease', 'congestion-release.lua', 2);
+    await this.loadScript('recordJobResult', 'record-job-result.lua', 2);
+    await this.loadScript('transitionStatus', 'transition-status.lua', 1);
+    await this.loadScript('acquireLock', 'acquire-lock.lua', 1);
+    await this.loadScript('releaseLock', 'release-lock.lua', 1);
   }
 
   private async loadScript(
