@@ -1,27 +1,35 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import { RedisModule } from '@app/redis/RedisModule';
+import { AggregatorService } from './aggregator/AggregatorService';
+import { AGGREGATOR } from './aggregator/AggregatorInterface';
+import { DefaultAggregator } from './aggregator/DefaultAggregator';
 import { BackpressureService } from './backpressure/BackpressureService';
 import { DispatcherService } from './backpressure/DispatcherService';
 import { NonReadyQueueService } from './backpressure/NonReadyQueueService';
 import { RateLimiterService } from './backpressure/RateLimiterService';
 import { ReadyQueueService } from './backpressure/ReadyQueueService';
 import {
+  AggregatorConfig,
   BackpressureConfig,
   BULK_ACTION_CONFIG,
   BulkActionConfig,
   BulkActionRedisConfig,
   CongestionConfig,
+  DEFAULT_AGGREGATOR_CONFIG,
   DEFAULT_BACKPRESSURE_CONFIG,
   DEFAULT_CONGESTION_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_WATCHER_CONFIG,
   DEFAULT_WORKER_POOL_CONFIG,
   FairQueueConfig,
+  WatcherConfig,
   WorkerPoolConfig,
 } from './config/BulkActionConfig';
 import { CongestionControlService } from './congestion/CongestionControlService';
 import { CongestionStatsService } from './congestion/CongestionStatsService';
 import { FairQueueService } from './fair-queue/FairQueueService';
 import { RedisKeyBuilder } from './key/RedisKeyBuilder';
+import { DistributedLockService } from './lock/DistributedLockService';
 import { LuaScriptLoader } from './lua/LuaScriptLoader';
 import { BulkActionService } from './BulkActionService';
 import { EmailProcessor } from './processor/EmailProcessor';
@@ -29,6 +37,7 @@ import { PushNotificationProcessor } from './processor/PushNotificationProcessor
 import { FetcherService } from './worker-pool/FetcherService';
 import { JOB_PROCESSOR } from './model/job-processor/JobProcessor';
 import { WorkerPoolService } from './worker-pool/WorkerPoolService';
+import { WatcherService } from './watcher/WatcherService';
 
 @Module({})
 export class BulkActionModule {
@@ -38,6 +47,8 @@ export class BulkActionModule {
       backpressure?: Partial<BackpressureConfig>;
       congestion?: Partial<CongestionConfig>;
       workerPool?: Partial<WorkerPoolConfig>;
+      aggregator?: Partial<AggregatorConfig>;
+      watcher?: Partial<WatcherConfig>;
     },
   ): DynamicModule {
     const mergedConfig: BulkActionConfig = {
@@ -57,6 +68,14 @@ export class BulkActionModule {
       workerPool: {
         ...DEFAULT_WORKER_POOL_CONFIG,
         ...config.workerPool,
+      },
+      aggregator: {
+        ...DEFAULT_AGGREGATOR_CONFIG,
+        ...config.aggregator,
+      },
+      watcher: {
+        ...DEFAULT_WATCHER_CONFIG,
+        ...config.watcher,
       },
     };
 
@@ -86,10 +105,19 @@ export class BulkActionModule {
         CongestionControlService,
         CongestionStatsService,
         FetcherService,
+        DistributedLockService,
+        AggregatorService,
+        WatcherService,
         WorkerPoolService,
         BulkActionService,
         EmailProcessor,
         PushNotificationProcessor,
+        DefaultAggregator,
+        {
+          provide: AGGREGATOR,
+          useFactory: (defaultAgg: DefaultAggregator) => [defaultAgg],
+          inject: [DefaultAggregator],
+        },
         {
           provide: JOB_PROCESSOR,
           useFactory: (
@@ -106,6 +134,8 @@ export class BulkActionModule {
         ReadyQueueService,
         CongestionControlService,
         WorkerPoolService,
+        AggregatorService,
+        DistributedLockService,
       ],
     };
   }
@@ -122,6 +152,25 @@ export class BulkActionModule {
         ...processors,
       ],
       exports: [JOB_PROCESSOR],
+    };
+  }
+
+  static registerAggregators(aggregators: any[]): DynamicModule {
+    return {
+      module: BulkActionModule,
+      providers: [
+        {
+          provide: AGGREGATOR,
+          useFactory: (defaultAgg: DefaultAggregator, ...custom: any[]) => [
+            defaultAgg,
+            ...custom,
+          ],
+          inject: [DefaultAggregator, ...aggregators],
+        },
+        DefaultAggregator,
+        ...aggregators,
+      ],
+      exports: [AGGREGATOR],
     };
   }
 }

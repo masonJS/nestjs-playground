@@ -110,6 +110,7 @@ export class Worker {
       // 4. 타임아웃 + 실행
       const result = await this.executeWithTimeout(processor, job);
       result.durationMs = Date.now() - startTime;
+      result.processorType = job.processorType;
 
       // 5. 결과 처리
       if (result.success) {

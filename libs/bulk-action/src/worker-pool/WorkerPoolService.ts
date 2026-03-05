@@ -23,6 +23,7 @@ import { FairQueueService } from '../fair-queue/FairQueueService';
 import { BackpressureService } from '../backpressure/BackpressureService';
 import { ReadyQueueService } from '../backpressure/ReadyQueueService';
 import { CongestionControlService } from '../congestion/CongestionControlService';
+import { AggregatorService } from '../aggregator/AggregatorService';
 import { Job } from '../model/job/Job';
 import { JobStatus } from '../model/job/type/JobStatus';
 import { JobProcessorResponse } from '../model/job-processor/dto/JobProcessorResponse';
@@ -45,6 +46,7 @@ export class WorkerPoolService implements OnModuleInit, OnApplicationShutdown {
     private readonly backpressure: BackpressureService,
     private readonly readyQueue: ReadyQueueService,
     private readonly congestionControl: CongestionControlService,
+    private readonly aggregatorService: AggregatorService,
   ) {
     for (const processor of processors) {
       this.processorMap.set(processor.type, processor);
@@ -117,6 +119,10 @@ export class WorkerPoolService implements OnModuleInit, OnApplicationShutdown {
 
   private async handleJobComplete(result: JobProcessorResponse): Promise<void> {
     try {
+      // 1. Record result (successCount/failedCount)
+      await this.aggregatorService.recordJobResult(result);
+
+      // 2. ack (doneJobs + AGGREGATING transition)
       const isGroupCompleted = await this.fairQueue.ack(
         result.jobId,
         result.groupId,
@@ -125,6 +131,7 @@ export class WorkerPoolService implements OnModuleInit, OnApplicationShutdown {
       if (isGroupCompleted) {
         this.logger.log(`Group ${result.groupId} completed`);
         await this.congestionControl.resetGroupStats(result.groupId);
+        await this.aggregatorService.finalizeGroup(result.groupId);
       }
 
       this.logger.debug(
@@ -184,6 +191,17 @@ export class WorkerPoolService implements OnModuleInit, OnApplicationShutdown {
       'status',
       JobStatus.FAILED,
     );
+
+    // Record failed result for aggregation
+    await this.aggregatorService.recordJobResult({
+      jobId: job.id,
+      groupId: job.groupId,
+      success: false,
+      durationMs: 0,
+      processorType: job.processorType,
+      error: { message: error.message, retryable: false },
+    });
+
     await this.fairQueue.ack(job.id, job.groupId);
 
     this.logger.error(
