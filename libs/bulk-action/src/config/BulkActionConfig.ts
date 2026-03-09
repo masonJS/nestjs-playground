@@ -52,6 +52,16 @@ export interface WatcherConfig {
   staleGroupThresholdMs: number;
 }
 
+export interface ReliableQueueConfig {
+  ackTimeoutMs: number;
+  orphanRecoveryIntervalMs: number;
+  orphanRecoveryBatchSize: number;
+  maxRetryCount: number;
+  deadLetterRetentionMs: number;
+  idempotencyTtlMs: number;
+  workerPollIntervalMs: number;
+}
+
 export interface BulkActionConfig {
   redis: BulkActionRedisConfig;
   fairQueue: FairQueueConfig;
@@ -60,6 +70,7 @@ export interface BulkActionConfig {
   workerPool: WorkerPoolConfig;
   aggregator: AggregatorConfig;
   watcher: WatcherConfig;
+  reliableQueue: ReliableQueueConfig;
 }
 
 export const DEFAULT_FAIR_QUEUE_CONFIG: FairQueueConfig = {
@@ -106,4 +117,14 @@ export const DEFAULT_WATCHER_CONFIG: WatcherConfig = {
   lockRetryCount: 3,
   lockRetryDelayMs: 200,
   staleGroupThresholdMs: 60000, // 1min
+};
+
+export const DEFAULT_RELIABLE_QUEUE_CONFIG: ReliableQueueConfig = {
+  ackTimeoutMs: 40000,
+  orphanRecoveryIntervalMs: 5000,
+  orphanRecoveryBatchSize: 100,
+  maxRetryCount: 3,
+  deadLetterRetentionMs: 30 * 24 * 60 * 60 * 1000, // 30 days
+  idempotencyTtlMs: 86400000, // 24h
+  workerPollIntervalMs: 200,
 };

@@ -7,6 +7,7 @@ import {
   DEFAULT_WORKER_POOL_CONFIG,
   DEFAULT_AGGREGATOR_CONFIG,
   DEFAULT_WATCHER_CONFIG,
+  DEFAULT_RELIABLE_QUEUE_CONFIG,
 } from '@app/bulk-action/config/BulkActionConfig';
 
 type DeepPartial<T> = {
@@ -51,6 +52,14 @@ export function createTestBulkActionConfig(
     watcher: {
       ...DEFAULT_WATCHER_CONFIG,
       ...overrides?.watcher,
+    },
+    reliableQueue: {
+      ...DEFAULT_RELIABLE_QUEUE_CONFIG,
+      ackTimeoutMs: 5000,
+      orphanRecoveryIntervalMs: 100,
+      orphanRecoveryBatchSize: 50,
+      workerPollIntervalMs: 50,
+      ...overrides?.reliableQueue,
     },
   };
 }
