@@ -21,9 +21,9 @@ import {
 } from '../model/job-processor/JobProcessor';
 import { FairQueueService } from '../fair-queue/FairQueueService';
 import { BackpressureService } from '../backpressure/BackpressureService';
-import { ReadyQueueService } from '../backpressure/ReadyQueueService';
 import { CongestionControlService } from '../congestion/CongestionControlService';
 import { AggregatorService } from '../aggregator/AggregatorService';
+import { ReliableQueueService } from '../reliable-queue/ReliableQueueService';
 import { Job } from '../model/job/Job';
 import { JobStatus } from '../model/job/type/JobStatus';
 import { JobProcessorResponse } from '../model/job-processor/dto/JobProcessorResponse';
@@ -44,9 +44,9 @@ export class WorkerPoolService implements OnModuleInit, OnApplicationShutdown {
     private readonly dispatcherService: DispatcherService,
     private readonly fairQueue: FairQueueService,
     private readonly backpressure: BackpressureService,
-    private readonly readyQueue: ReadyQueueService,
     private readonly congestionControl: CongestionControlService,
     private readonly aggregatorService: AggregatorService,
+    private readonly reliableQueue: ReliableQueueService,
   ) {
     for (const processor of processors) {
       this.processorMap.set(processor.type, processor);
@@ -88,17 +88,23 @@ export class WorkerPoolService implements OnModuleInit, OnApplicationShutdown {
   }
 
   private createWorkers(): void {
-    const { workerCount, workerTimeoutSec, jobTimeoutMs } =
-      this.config.workerPool;
+    const { workerCount, jobTimeoutMs } = this.config.workerPool;
+    const { workerPollIntervalMs } = this.config.reliableQueue;
 
     for (let i = 0; i < workerCount; i++) {
-      const worker = new Worker(i, this.readyQueue, this.processorMap, {
-        timeoutSec: workerTimeoutSec,
+      const worker = new Worker(i, this.processorMap, {
         jobTimeoutMs,
+        pollIntervalMs: workerPollIntervalMs,
         onJobComplete: async (result) => this.handleJobComplete(result),
         onJobFailed: async (job, error) => this.handleJobFailed(job, error),
         loadJobData: async (jobId) =>
           this.redisService.hash.getAll(this.keys.job(jobId)),
+        reliableDequeue: async (workerId) =>
+          this.reliableQueue.dequeue(workerId),
+        reliableAck: async (jobId) => this.reliableQueue.ack(jobId),
+        reliableNack: async (jobId) => this.reliableQueue.nack(jobId),
+        extendDeadline: async (jobId) =>
+          this.reliableQueue.extendDeadline(jobId),
       });
       this.workers.push(worker);
     }
@@ -179,10 +185,11 @@ export class WorkerPoolService implements OnModuleInit, OnApplicationShutdown {
 
   private async handleDeadLetter(job: Job, error: Error): Promise<void> {
     const entry = JSON.stringify({
-      job,
+      jobId: job.id,
+      groupId: job.groupId,
+      retryCount: job.retryCount,
       error: error.message,
       failedAt: Date.now(),
-      retryCount: job.retryCount,
     });
     await this.redisService.list.append(this.keys.deadLetterQueue(), entry);
 
