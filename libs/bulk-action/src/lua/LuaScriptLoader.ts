@@ -20,6 +20,10 @@ export class LuaScriptLoader implements OnModuleInit {
     await this.loadScript('transitionStatus', 'transition-status.lua', 1);
     await this.loadScript('acquireLock', 'acquire-lock.lua', 1);
     await this.loadScript('releaseLock', 'release-lock.lua', 1);
+    await this.loadScript('reliableDequeue', 'reliable-dequeue.lua', 3);
+    await this.loadScript('reliableAck', 'reliable-ack.lua', 2);
+    await this.loadScript('recoverOrphans', 'recover-orphans.lua', 4);
+    await this.loadScript('extendDeadline', 'extend-deadline.lua', 2);
   }
 
   private async loadScript(
