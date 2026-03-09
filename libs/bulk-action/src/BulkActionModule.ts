@@ -19,9 +19,11 @@ import {
   DEFAULT_BACKPRESSURE_CONFIG,
   DEFAULT_CONGESTION_CONFIG,
   DEFAULT_FAIR_QUEUE_CONFIG,
+  DEFAULT_RELIABLE_QUEUE_CONFIG,
   DEFAULT_WATCHER_CONFIG,
   DEFAULT_WORKER_POOL_CONFIG,
   FairQueueConfig,
+  ReliableQueueConfig,
   WatcherConfig,
   WorkerPoolConfig,
 } from './config/BulkActionConfig';
@@ -37,6 +39,11 @@ import { PushNotificationProcessor } from './processor/PushNotificationProcessor
 import { FetcherService } from './worker-pool/FetcherService';
 import { JOB_PROCESSOR } from './model/job-processor/JobProcessor';
 import { WorkerPoolService } from './worker-pool/WorkerPoolService';
+import { ReliableQueueService } from './reliable-queue/ReliableQueueService';
+import { InFlightQueueService } from './reliable-queue/InFlightQueueService';
+import { OrphanRecoveryService } from './reliable-queue/OrphanRecoveryService';
+import { DeadLetterService } from './reliable-queue/DeadLetterService';
+import { IdempotencyService } from './idempotency/IdempotencyService';
 import { WatcherService } from './watcher/WatcherService';
 
 @Module({})
@@ -49,6 +56,7 @@ export class BulkActionModule {
       workerPool?: Partial<WorkerPoolConfig>;
       aggregator?: Partial<AggregatorConfig>;
       watcher?: Partial<WatcherConfig>;
+      reliableQueue?: Partial<ReliableQueueConfig>;
     },
   ): DynamicModule {
     const mergedConfig: BulkActionConfig = {
@@ -76,6 +84,10 @@ export class BulkActionModule {
       watcher: {
         ...DEFAULT_WATCHER_CONFIG,
         ...config.watcher,
+      },
+      reliableQueue: {
+        ...DEFAULT_RELIABLE_QUEUE_CONFIG,
+        ...config.reliableQueue,
       },
     };
 
@@ -108,6 +120,11 @@ export class BulkActionModule {
         DistributedLockService,
         AggregatorService,
         WatcherService,
+        ReliableQueueService,
+        InFlightQueueService,
+        OrphanRecoveryService,
+        DeadLetterService,
+        IdempotencyService,
         WorkerPoolService,
         BulkActionService,
         EmailProcessor,
@@ -136,6 +153,10 @@ export class BulkActionModule {
         WorkerPoolService,
         AggregatorService,
         DistributedLockService,
+        ReliableQueueService,
+        InFlightQueueService,
+        DeadLetterService,
+        IdempotencyService,
       ],
     };
   }
