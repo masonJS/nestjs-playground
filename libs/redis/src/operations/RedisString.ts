@@ -18,4 +18,16 @@ export class RedisString {
   async decrement(key: string): Promise<number> {
     return this.client.decr(key);
   }
+
+  async setNX(key: string, value: string, ttlSec: number): Promise<boolean> {
+    const result = await this.client.set(key, value, 'EX', ttlSec, 'NX');
+
+    return result === 'OK';
+  }
+
+  async exists(key: string): Promise<boolean> {
+    const result = await this.client.exists(key);
+
+    return result === 1;
+  }
 }
