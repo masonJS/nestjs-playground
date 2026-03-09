@@ -96,6 +96,26 @@ export class RedisKeyBuilder {
     return `${this.prefix}group:${groupId}:failed-details`;
   }
 
+  // ── Reliable Queue ──
+
+  inFlightQueue(): string {
+    return `${this.prefix}in-flight-queue`;
+  }
+
+  inFlightMeta(jobId: string): string {
+    return `${this.prefix}in-flight:${jobId}`;
+  }
+
+  inFlightMetaPrefix(): string {
+    return `${this.prefix}in-flight:`;
+  }
+
+  // ── Idempotency ──
+
+  idempotency(key: string): string {
+    return `${this.prefix}idempotency:${key}`;
+  }
+
   // ── Lock ──
 
   groupTransitionLock(groupId: string): string {
