@@ -483,176 +483,202 @@ Type: List
 ]
 ```
 
-### Lua 스크립트: reliable_dequeue.lua
+### Lua 스크립트: reliable-dequeue.lua
 
-Ready Queue에서 pop하고 In-flight Queue에 등록하는 원자적 연산이다.
+Ready Queue에서 pop하고 In-flight Queue에 등록하는 원자적 연산이다. Node.js에서 LINDEX로 peek한 뒤 retryCount/groupId를 Job Hash에서 pre-fetch하여 ARGV로 전달한다 (Lua 내 Job Hash 접근 회피).
 
 > ⚠️ **Redis Cluster 해시 슬롯 주의:**
-> Lua 내부에서 `KEYS[3] .. ':' .. jobId` 로 동적 키를 생성하면,
-> 이 키가 KEYS 배열에 포함되지 않아 Redis Cluster에서 해시 슬롯을 사전 결정할 수 없다.
->
-> **Standalone Redis** 환경에서는 문제 없으나, **Redis Cluster** 환경에서는:
-> - 모든 KEYS가 같은 해시 슬롯에 있어야 한다 → `{bulk-action}` 해시 태그 사용
-> - 동적 생성 키도 같은 해시 태그를 포함해야 한다
->
-> Cluster 환경 대응:
-> ```
-> KEYS[1] = {bulk-action}:ready-queue
-> KEYS[2] = {bulk-action}:in-flight-queue
-> KEYS[3] = {bulk-action}:in-flight    ← 접두사
-> 동적 키 = {bulk-action}:in-flight:job-001  ← 같은 해시 태그
-> ```
+> Lua 내부에서 `KEYS[3] .. jobId` 로 동적 키를 생성하므로,
+> Cluster 환경에서는 `{bulk-action}` 해시 태그를 사용해야 한다.
 
 ```lua
--- KEYS[1]: ready queue (List)
--- KEYS[2]: in-flight queue (Sorted Set)
--- KEYS[3]: in-flight metadata prefix
--- ARGV[1]: ACK timeout (ms)
--- ARGV[2]: worker ID
--- ARGV[3]: instance ID
--- ARGV[4]: Job 키 접두사 (keyPrefix 대응, 예: 'bulk-action:job:')
--- ARGV[5]: retryCount (Node.js에서 Job Hash 조회 후 전달)
--- ARGV[6]: groupId (Node.js에서 Job Hash 조회 후 전달)
+local readyQueueKey       = KEYS[1]  -- bulk-action:ready-queue
+local inFlightQueueKey    = KEYS[2]  -- bulk-action:in-flight-queue
+local inFlightMetaPrefix  = KEYS[3]  -- bulk-action:in-flight:
 
--- 1. Ready Queue에서 pop
-local jobId = redis.call('LPOP', KEYS[1])
+local ackTimeoutMs = tonumber(ARGV[1])
+local workerId     = ARGV[2]
+local instanceId   = ARGV[3]
+local retryCount   = ARGV[4]
+local groupId      = ARGV[5]
+
+-- 1. Ready Queue에서 작업 꺼냄
+local jobId = redis.call('LPOP', readyQueueKey)
 if not jobId then
   return nil
 end
 
--- 2. ACK deadline 계산
+-- 2. deadline 계산 (현재 시각 + ackTimeoutMs)
 local now = redis.call('TIME')
 local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
-local deadline = nowMs + tonumber(ARGV[1])
+local deadline = nowMs + ackTimeoutMs
 
--- 3. In-flight Queue에 등록
-redis.call('ZADD', KEYS[2], deadline, jobId)
+-- 3. In-flight Queue에 등록 (score = deadline)
+redis.call('ZADD', inFlightQueueKey, deadline, jobId)
 
 -- 4. In-flight 메타데이터 저장
--- ⚠️ retryCount, groupId를 포함해야 recover_orphans.lua에서
--- Dead Letter 판정과 Step 5 집계 연동이 가능하다 (Issue #7).
-local metaKey = KEYS[3] .. ':' .. jobId
+local metaKey = inFlightMetaPrefix .. jobId
 redis.call('HSET', metaKey,
   'jobId', jobId,
-  'workerId', ARGV[2],
-  'instanceId', ARGV[3],
-  'retryCount', ARGV[5] or '0',
-  'groupId', ARGV[6] or '',
-  'startedAt', tostring(nowMs),
-  'deadline', tostring(deadline)
+  'workerId', workerId,
+  'instanceId', instanceId,
+  'deadline', tostring(deadline),
+  'dequeuedAt', tostring(nowMs),
+  'retryCount', retryCount,
+  'groupId', groupId
 )
--- 메타데이터 TTL = timeout + 60초 여유
-local ttlSec = math.ceil(tonumber(ARGV[1]) / 1000) + 60
-redis.call('EXPIRE', metaKey, ttlSec)
 
 return {jobId, tostring(deadline)}
 ```
 
-### Lua 스크립트: ack_job.lua
+### Lua 스크립트: reliable-ack.lua
 
-작업 완료 확인(ACK)이다.
-
-> ⚠️ 동일한 Redis Cluster 해시 슬롯 주의사항이 적용된다.
-> `KEYS[2] .. ':' .. ARGV[1]` 동적 키는 같은 해시 태그(`{bulk-action}`)를 포함해야 한다.
+작업 완료 확인(ACK). `nack()`도 동일한 Lua를 재사용한다 (In-flight 제거만 수행, retry/DLQ 판정은 기존 `handleJobFailed` 담당).
 
 ```lua
--- KEYS[1]: in-flight queue (Sorted Set)
--- KEYS[2]: in-flight metadata prefix
--- ARGV[1]: jobId
+local inFlightQueueKey   = KEYS[1]  -- bulk-action:in-flight-queue
+local inFlightMetaPrefix = KEYS[2]  -- bulk-action:in-flight:
+
+local jobId = ARGV[1]
 
 -- 1. In-flight Queue에서 제거
-local removed = redis.call('ZREM', KEYS[1], ARGV[1])
+local removed = redis.call('ZREM', inFlightQueueKey, jobId)
 
 -- 2. 메타데이터 삭제
-local metaKey = KEYS[2] .. ':' .. ARGV[1]
+local metaKey = inFlightMetaPrefix .. jobId
 redis.call('DEL', metaKey)
 
-return removed  -- 1이면 정상 ACK, 0이면 이미 제거됨 (timeout으로 복구된 경우)
+-- removed=1이면 정상 ACK, 0이면 late ACK (이미 orphan recovery에 의해 제거됨)
+return removed
 ```
 
-### Lua 스크립트: recover_orphans.lua
+### Lua 스크립트: extend-deadline.lua
 
-타임아웃된 작업을 복구한다.
-
-> ⚠️ **ioredis keyPrefix 주의 (Step 3 이슈 #8과 동일 패턴):**
-> Lua 내부에서 `'job:' .. jobId` 로 키를 구성하면, ioredis의 `keyPrefix`가 적용되지 않는다.
-> - Node.js: `redis.hget('job:001', ...)` → 실제 키 `bulk-action:job:001` (keyPrefix 적용)
-> - Lua 내부: `redis.call('HGET', 'job:' .. '001', ...)` → 실제 키 `job:001` (keyPrefix 미적용)
->
-> **해결:** Job 키 접두사를 ARGV로 전달한다. 아래 수정된 스크립트에서 `ARGV[4]`로 전달.
+ACK deadline을 원자적으로 연장한다. In-flight에 존재하는지 확인 후 갱신하여, OrphanRecovery와의 Race condition을 방지한다.
 
 ```lua
--- KEYS[1]: in-flight queue (Sorted Set)
--- KEYS[2]: ready queue (List)
--- KEYS[3]: dead letter queue (List)
--- KEYS[4]: in-flight metadata prefix
--- ARGV[1]: 현재 시각 (epoch ms)
--- ARGV[2]: 최대 복구 수 (batch size)
--- ARGV[3]: 최대 재시도 횟수
--- ARGV[4]: Job 키 접두사 (예: 'bulk-action:job:' 또는 'job:')
---          Node.js에서 `${redis.options.keyPrefix ?? ''}job:` 형태로 전달한다.
+local inFlightQueueKey   = KEYS[1]  -- bulk-action:in-flight-queue
+local inFlightMetaPrefix = KEYS[2]  -- bulk-action:in-flight:
 
-local maxRetry = tonumber(ARGV[3])
-local jobKeyPrefix = ARGV[4]
+local jobId      = ARGV[1]
+local extensionMs = tonumber(ARGV[2])
 
--- 1. 타임아웃된 작업 조회
-local orphans = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, tonumber(ARGV[2]))
+-- 1. In-flight Queue에 존재하는지 확인
+local currentScore = redis.call('ZSCORE', inFlightQueueKey, jobId)
+if not currentScore then
+  return 0  -- 이미 제거됨 (ACK 또는 orphan recovery)
+end
+
+-- 2. 새 deadline 계산
+local now = redis.call('TIME')
+local nowMs = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+local newDeadline = nowMs + extensionMs
+
+-- 3. In-flight Queue 갱신
+redis.call('ZADD', inFlightQueueKey, newDeadline, jobId)
+
+-- 4. 메타데이터 갱신
+local metaKey = inFlightMetaPrefix .. jobId
+redis.call('HSET', metaKey, 'deadline', tostring(newDeadline))
+
+return 1  -- 성공
+```
+
+### Lua 스크립트: recover-orphans.lua
+
+타임아웃된 작업을 복구한다. Dead Letter 이동 시 `{jobId, groupId}` 쌍을 반환하여 Node.js에서 Aggregator 집계 + FairQueue ACK 처리에 사용한다.
+
+> ⚠️ **keyPrefix 주의:** Lua 내부에서 Job Hash에 접근해야 하므로,
+> `keys.getPrefix() + 'job:'` 형태로 Job 키 접두사를 ARGV[4]로 전달한다.
+
+```lua
+local inFlightQueueKey   = KEYS[1]  -- bulk-action:in-flight-queue
+local readyQueueKey      = KEYS[2]  -- bulk-action:ready-queue
+local deadLetterQueueKey = KEYS[3]  -- bulk-action:dead-letter-queue
+local inFlightMetaPrefix = KEYS[4]  -- bulk-action:in-flight:
+
+local nowMs          = tonumber(ARGV[1])
+local batchSize      = tonumber(ARGV[2])
+local maxRetryCount  = tonumber(ARGV[3])
+local jobKeyPrefix   = ARGV[4]  -- e.g. 'test:job:'
+
+-- 1. deadline이 지난 작업 조회
+local orphans = redis.call('ZRANGEBYSCORE', inFlightQueueKey, '-inf', nowMs, 'LIMIT', 0, batchSize)
 
 if #orphans == 0 then
-  return {0, 0}  -- {recovered, deadLettered}
+  return {0, 0}
 end
 
 local recovered = 0
 local deadLettered = 0
-local deadLetteredJobIds = {}
+local deadLetteredPairs = {}  -- {jobId1, groupId1, jobId2, groupId2, ...}
 
 for _, jobId in ipairs(orphans) do
-  -- 2. In-flight Queue에서 제거
-  redis.call('ZREM', KEYS[1], jobId)
+  -- In-flight Queue에서 제거
+  redis.call('ZREM', inFlightQueueKey, jobId)
 
-  -- 3. 메타데이터에서 retryCount 확인
-  local metaKey = KEYS[4] .. ':' .. jobId
-  local metaRetryCount = tonumber(redis.call('HGET', metaKey, 'retryCount') or '0')
+  -- 메타데이터에서 retryCount, groupId 조회
+  local metaKey = inFlightMetaPrefix .. jobId
+  local meta = redis.call('HGETALL', metaKey)
 
-  -- In-flight 메타에 retryCount가 없으면 Job Hash에서 조회 (하위 호환)
-  local jobKey = jobKeyPrefix .. jobId
-  if metaRetryCount == 0 then
-    metaRetryCount = tonumber(redis.call('HGET', jobKey, 'retryCount') or '0')
+  local retryCount = 0
+  local groupId = ''
+
+  -- 메타데이터 파싱
+  if #meta > 0 then
+    for i = 1, #meta, 2 do
+      if meta[i] == 'retryCount' then
+        retryCount = tonumber(meta[i + 1]) or 0
+      elseif meta[i] == 'groupId' then
+        groupId = meta[i + 1]
+      end
+    end
+  else
+    -- 메타데이터가 없으면 Job Hash에서 fallback 조회
+    local jobKey = jobKeyPrefix .. jobId
+    retryCount = tonumber(redis.call('HGET', jobKey, 'retryCount') or '0')
+    groupId = redis.call('HGET', jobKey, 'groupId') or ''
   end
 
-  if metaRetryCount < maxRetry then
-    -- 4a. 재시도 가능 → Ready Queue로 복구
-    redis.call('RPUSH', KEYS[2], jobId)
+  -- 메타데이터 삭제
+  redis.call('DEL', metaKey)
 
-    -- Job 데이터의 retryCount 증가
-    redis.call('HINCRBY', jobKey, 'retryCount', 1)
-    redis.call('HSET', jobKey, 'status', 'PENDING')
-
-    recovered = recovered + 1
-  else
-    -- 4b. 최대 재시도 초과 → Dead Letter Queue
-    local now = ARGV[1]
-    local groupId = redis.call('HGET', metaKey, 'groupId') or ''
+  if retryCount >= maxRetryCount then
+    -- DLQ로 이동
     local entry = cjson.encode({
       jobId = jobId,
       groupId = groupId,
-      retryCount = metaRetryCount,
-      failedAt = tonumber(now),
+      retryCount = retryCount,
+      error = 'orphan: max retries exceeded',
+      failedAt = nowMs,
     })
-    redis.call('RPUSH', KEYS[3], entry)
+    redis.call('RPUSH', deadLetterQueueKey, entry)
 
+    -- Job 상태를 FAILED로 변경
+    local jobKey = jobKeyPrefix .. jobId
     redis.call('HSET', jobKey, 'status', 'FAILED')
 
     deadLettered = deadLettered + 1
-    table.insert(deadLetteredJobIds, jobId)
-  end
+    table.insert(deadLetteredPairs, jobId)
+    table.insert(deadLetteredPairs, groupId)
+  else
+    -- Ready Queue로 복구, retryCount 증가
+    local jobKey = jobKeyPrefix .. jobId
+    redis.call('HINCRBY', jobKey, 'retryCount', 1)
+    redis.call('HSET', jobKey, 'status', 'PENDING')
+    redis.call('RPUSH', readyQueueKey, jobId)
 
-  -- 5. 메타데이터 삭제
-  redis.call('DEL', metaKey)
+    recovered = recovered + 1
+  end
 end
 
--- Dead Letter로 이동된 jobId 목록도 반환 (Step 5 Aggregator 연동용)
-return {recovered, deadLettered, unpack(deadLetteredJobIds)}
+-- 반환: [recovered, deadLettered, jobId1, groupId1, jobId2, groupId2, ...]
+local result = {recovered, deadLettered}
+for _, v in ipairs(deadLetteredPairs) do
+  table.insert(result, v)
+end
+
+return result
 ```
 
 ---
@@ -664,520 +690,340 @@ return {recovered, deadLettered, unpack(deadLetteredJobIds)}
 ```
 libs/bulk-action/src/
 ├── reliable-queue/
-│   ├── reliable-queue.service.ts             # 신뢰성 있는 큐 서비스
-│   ├── reliable-queue.service.spec.ts        # 통합 테스트
-│   ├── in-flight-queue.service.ts            # In-flight 작업 추적
-│   ├── in-flight-queue.service.spec.ts       # In-flight 테스트
-│   ├── orphan-recovery.service.ts            # Orphaned Job 복구
-│   ├── orphan-recovery.service.spec.ts       # 복구 테스트
-│   ├── dead-letter.service.ts                # Dead Letter 관리
-│   └── reliable-queue.constants.ts           # 상수 정의
+│   ├── ReliableQueueService.ts              # 신뢰성 있는 큐 서비스
+│   ├── InFlightQueueService.ts              # In-flight 작업 추적/모니터링
+│   ├── OrphanRecoveryService.ts             # Orphaned Job 복구
+│   ├── DeadLetterService.ts                 # Dead Letter 관리
+│   └── DequeueResult.ts                     # Dequeue 결과 인터페이스
 ├── idempotency/
-│   ├── idempotency.service.ts                # 멱등성 헬퍼
-│   └── idempotency.service.spec.ts           # 멱등성 테스트
+│   └── IdempotencyService.ts                # 멱등성 헬퍼
 ├── config/
-│   └── bulk-action.config.ts                 # reliableQueue 설정 추가
+│   └── BulkActionConfig.ts                  # ReliableQueueConfig 추가
+├── key/
+│   └── RedisKeyBuilder.ts                   # in-flight, idempotency 키 추가
 └── lua/
-    ├── reliable_dequeue.lua                  # 원자적 pop + in-flight 등록
-    ├── ack_job.lua                           # ACK 처리
-    └── recover_orphans.lua                   # Orphan 복구
+    ├── reliable-dequeue.lua                 # 원자적 LPOP + ZADD + HSET
+    ├── reliable-ack.lua                     # ZREM + DEL metadata
+    ├── recover-orphans.lua                  # Orphan 스캔 → Ready Queue 복구 or DLQ
+    └── extend-deadline.lua                  # 원자적 deadline 연장
+
+libs/bulk-action/test/
+├── reliable-queue/
+│   ├── ReliableQueueService.spec.ts         # 통합 테스트
+│   ├── InFlightQueueService.spec.ts         # In-flight 테스트
+│   ├── OrphanRecoveryService.spec.ts        # 복구 테스트
+│   └── DeadLetterService.spec.ts            # DLQ 테스트
+└── idempotency/
+    └── IdempotencyService.spec.ts           # 멱등성 테스트
 ```
 
 ### 설정 확장
 
-**`config/bulk-action.config.ts`** (최종)
+**`config/BulkActionConfig.ts`**
 
 ```typescript
-export interface BulkActionConfig {
-  redis: { /* ... */ };
-  fairQueue: { /* ... */ };
-  backpressure: { /* ... */ };
-  congestion: { /* ... */ };
-  workerPool: { /* ... */ };
-  aggregator: { /* ... */ };
-  watcher: { /* ... */ };
-  reliableQueue: {
-    ackTimeoutMs: number;              // ACK 타임아웃 (default: 40000)
-    orphanRecoveryIntervalMs: number;  // 복구 스캔 주기 (default: 5000)
-    orphanRecoveryBatchSize: number;   // 1회 최대 복구 수 (default: 100)
-    maxRetryCount: number;             // 최대 재시도 (default: 3, workerPool과 공유 가능)
-    deadLetterRetentionMs: number;     // DLQ 보관 기간 (default: 30일)
-    idempotencyTtlMs: number;          // 멱등성 키 TTL (default: 86400000 = 24시간)
-  };
+export interface ReliableQueueConfig {
+  ackTimeoutMs: number;              // ACK 타임아웃 (default: 40000)
+  orphanRecoveryIntervalMs: number;  // 복구 스캔 주기 (default: 5000)
+  orphanRecoveryBatchSize: number;   // 1회 최대 복구 수 (default: 100)
+  maxRetryCount: number;             // 최대 재시도 (default: 3)
+  deadLetterRetentionMs: number;     // DLQ 보관 기간 (default: 30일)
+  idempotencyTtlMs: number;          // 멱등성 키 TTL (default: 86400000 = 24시간)
+  workerPollIntervalMs: number;      // Worker poll 간격 (default: 200)
 }
 
-export const DEFAULT_BULK_ACTION_CONFIG: BulkActionConfig = {
-  // ... 기존 설정 생략
-  reliableQueue: {
-    ackTimeoutMs: 40000,
-    orphanRecoveryIntervalMs: 5000,
-    orphanRecoveryBatchSize: 100,
-    maxRetryCount: 3,
-    deadLetterRetentionMs: 30 * 24 * 60 * 60 * 1000,
-    idempotencyTtlMs: 86400000,
-  },
+export interface BulkActionConfig {
+  redis: BulkActionRedisConfig;
+  fairQueue: FairQueueConfig;
+  backpressure: BackpressureConfig;
+  congestion: CongestionConfig;
+  workerPool: WorkerPoolConfig;
+  aggregator: AggregatorConfig;
+  watcher: WatcherConfig;
+  reliableQueue: ReliableQueueConfig;
+}
+
+export const DEFAULT_RELIABLE_QUEUE_CONFIG: ReliableQueueConfig = {
+  ackTimeoutMs: 40000,
+  orphanRecoveryIntervalMs: 5000,
+  orphanRecoveryBatchSize: 100,
+  maxRetryCount: 3,
+  deadLetterRetentionMs: 30 * 24 * 60 * 60 * 1000, // 30 days
+  idempotencyTtlMs: 86400000, // 24h
+  workerPollIntervalMs: 200,
 };
+```
+
+### RedisKeyBuilder 추가 키
+
+**`key/RedisKeyBuilder.ts`**
+
+```typescript
+// ── Reliable Queue ──
+inFlightQueue(): string {
+  return `${this.prefix}in-flight-queue`;
+}
+
+inFlightMeta(jobId: string): string {
+  return `${this.prefix}in-flight:${jobId}`;
+}
+
+inFlightMetaPrefix(): string {
+  return `${this.prefix}in-flight:`;
+}
+
+// ── Idempotency ──
+idempotency(key: string): string {
+  return `${this.prefix}idempotency:${key}`;
+}
 ```
 
 ---
 
 ## 구현 코드
 
-### In-flight Queue Service
+> 아래 코드는 실제 구현과 일치한다. 모든 Redis 접근은 `RedisService` 래퍼를 통해 이루어지며,
+> 키 관리는 `RedisKeyBuilder`에 위임한다. Lua 실행은 `redisService.callCommand()`를 사용한다.
 
-**`reliable-queue/in-flight-queue.service.ts`**
+### Dequeue Result
+
+**`reliable-queue/DequeueResult.ts`**
 
 ```typescript
-import { Injectable, Inject, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
+export interface DequeueResult {
+  jobId: string;
+  deadline: number;
+}
+```
+
+### In-flight Queue Service
+
+**`reliable-queue/InFlightQueueService.ts`**
+
+모니터링/조회 전용 서비스. `BULK_ACTION_CONFIG`를 주입하지 않는다.
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
 
 export interface InFlightEntry {
   jobId: string;
-  groupId: string;
   workerId: string;
   instanceId: string;
-  startedAt: number;
   deadline: number;
+  dequeuedAt: number;
   retryCount: number;
+  groupId: string;
 }
 
 @Injectable()
 export class InFlightQueueService {
-  private readonly logger = new Logger(InFlightQueueService.name);
-  private readonly queueKey = 'in-flight-queue';
-  private readonly metaPrefix = 'in-flight';
-
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
-    @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly redisService: RedisService,
+    private readonly keys: RedisKeyBuilder,
   ) {}
 
-  /**
-   * In-flight Queue의 현재 크기를 반환한다.
-   */
   async size(): Promise<number> {
-    return this.redis.zcard(this.queueKey);
+    return this.redisService.sortedSet.count(this.keys.inFlightQueue());
   }
 
-  /**
-   * 특정 작업이 In-flight 상태인지 확인한다.
-   */
   async isInFlight(jobId: string): Promise<boolean> {
-    const score = await this.redis.zscore(this.queueKey, jobId);
+    const score = await this.redisService.sortedSet.score(
+      this.keys.inFlightQueue(),
+      jobId,
+    );
     return score !== null;
   }
 
-  /**
-   * 타임아웃된 (orphaned) 작업 수를 반환한다.
-   */
   async orphanedCount(): Promise<number> {
-    return this.redis.zcount(this.queueKey, '-inf', Date.now().toString());
+    return this.redisService.sortedSet.countByScore(
+      this.keys.inFlightQueue(),
+      '-inf',
+      Date.now().toString(),
+    );
   }
 
-  /**
-   * 특정 작업의 In-flight 메타데이터를 조회한다.
-   */
   async getEntry(jobId: string): Promise<InFlightEntry | null> {
-    const metaKey = `${this.metaPrefix}:${jobId}`;
-    const data = await this.redis.hgetall(metaKey);
-
-    if (!data.jobId) return null;
+    const data = await this.redisService.hash.getAll(
+      this.keys.inFlightMeta(jobId),
+    );
+    if (!data || !data.jobId) return null;
 
     return {
       jobId: data.jobId,
-      groupId: data.groupId ?? '',
-      workerId: data.workerId ?? '',
-      instanceId: data.instanceId ?? '',
-      startedAt: parseInt(data.startedAt ?? '0', 10),
-      deadline: parseInt(data.deadline ?? '0', 10),
-      retryCount: parseInt(data.retryCount ?? '0', 10),
+      workerId: data.workerId,
+      instanceId: data.instanceId,
+      deadline: parseInt(data.deadline, 10),
+      dequeuedAt: parseInt(data.dequeuedAt, 10),
+      retryCount: parseInt(data.retryCount, 10),
+      groupId: data.groupId,
     };
   }
 
-  /**
-   * 전체 In-flight 작업 목록을 반환한다. (모니터링용)
-   */
   async getAllEntries(): Promise<Array<{ jobId: string; deadline: number }>> {
-    const entries = await this.redis.zrange(this.queueKey, 0, -1, 'WITHSCORES');
-    const result: Array<{ jobId: string; deadline: number }> = [];
-
-    for (let i = 0; i < entries.length; i += 2) {
-      result.push({
-        jobId: entries[i],
-        deadline: parseInt(entries[i + 1], 10),
-      });
-    }
-
-    return result;
-  }
-
-  /**
-   * 특정 Worker/Instance의 In-flight 작업을 조회한다.
-   */
-  async getByInstance(instanceId: string): Promise<string[]> {
-    // SCAN으로 메타데이터 검색 (성능 주의)
-    const jobs: string[] = [];
-    let cursor = '0';
-
-    do {
-      const [nextCursor, keys] = await this.redis.scan(
-        cursor, 'MATCH', `${this.metaPrefix}:*`, 'COUNT', 100,
-      );
-      cursor = nextCursor;
-
-      for (const key of keys) {
-        const instId = await this.redis.hget(key, 'instanceId');
-        if (instId === instanceId) {
-          const jobId = await this.redis.hget(key, 'jobId');
-          if (jobId) jobs.push(jobId);
-        }
-      }
-    } while (cursor !== '0');
-
-    return jobs;
+    const entries = await this.redisService.sortedSet.rangeWithScores(
+      this.keys.inFlightQueue(),
+      0,
+      -1,
+    );
+    return entries.map((e) => ({
+      jobId: e.member,
+      deadline: e.score,
+    }));
   }
 }
 ```
 
 ### Reliable Queue Service
 
-**`reliable-queue/reliable-queue.service.ts`**
+**`reliable-queue/ReliableQueueService.ts`**
+
+핵심 서비스. `blockingDequeue()`는 제거하고 non-blocking `dequeue()` + Worker poll+sleep 패턴을 사용한다. `nack()`은 `reliableAck` Lua를 재사용하여 In-flight 제거만 수행 — retry/DLQ 판정은 기존 `handleJobFailed`가 담당한다.
 
 ```typescript
-import { Injectable, Inject, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
-
-export interface DequeueResult {
-  jobId: string;
-  deadline: number;
-}
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
+import { DequeueResult } from './DequeueResult';
 
 @Injectable()
 export class ReliableQueueService {
   private readonly logger = new Logger(ReliableQueueService.name);
-  private readonly instanceId = randomUUID();
+  private readonly instanceId: string;
 
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
-  ) {}
-
-  /**
-   * Ready Queue에서 작업을 꺼내고 In-flight Queue에 등록한다.
-   *
-   * Lua 스크립트로 두 연산을 원자적으로 수행한다.
-   * 이 메서드가 Step 4 Worker의 readyQueue.pop()을 대체한다.
-   */
-  /**
-   * ⚠️ retryCount/groupId를 Lua에 전달:
-   * recover_orphans.lua에서 In-flight 메타의 retryCount로 Dead Letter 판정을 하므로,
-   * dequeue 시점에 Job Hash에서 retryCount와 groupId를 조회하여 Lua에 전달해야 한다.
-   *
-   * 이 조회는 Lua 실행 전에 수행한다 (Lua 내에서 job: 키에 접근하면
-   * keyPrefix/Cluster 해시 슬롯 문제가 발생하므로).
-   */
-  async dequeue(workerId: string): Promise<DequeueResult | null> {
-    try {
-      // Ready Queue에 작업이 있는지 미리 확인 (불필요한 Job Hash 조회 방지)
-      const queueLen = await this.redis.llen('ready-queue');
-      if (queueLen === 0) return null;
-
-      // Ready Queue의 첫 항목을 peek하여 retryCount/groupId를 미리 조회
-      // (LPOP은 Lua 내에서 수행하므로, 여기서는 LINDEX로 peek만 한다)
-      const peekJobId = await this.redis.lindex('ready-queue', 0);
-      let retryCount = '0';
-      let groupId = '';
-      if (peekJobId) {
-        const [rc, gid] = await Promise.all([
-          this.redis.hget(`job:${peekJobId}`, 'retryCount'),
-          this.redis.hget(`job:${peekJobId}`, 'groupId'),
-        ]);
-        retryCount = rc ?? '0';
-        groupId = gid ?? '';
-      }
-
-      const jobKeyPrefix = (this.redis.options?.keyPrefix ?? '') + 'job:';
-
-      const result = await (this.redis as any).reliable_dequeue(
-        'ready-queue',
-        'in-flight-queue',
-        'in-flight',
-        this.config.reliableQueue.ackTimeoutMs.toString(),
-        workerId,
-        this.instanceId,
-        jobKeyPrefix,
-        retryCount,
-        groupId,
-      );
-
-      if (!result) return null;
-
-      const jobId = result[0];
-      const deadline = parseInt(result[1], 10);
-
-      this.logger.debug(
-        `Dequeued job ${jobId} (worker=${workerId}, deadline=${new Date(deadline).toISOString()})`,
-      );
-
-      return { jobId, deadline };
-    } catch (error) {
-      this.logger.error(`Reliable dequeue failed: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  /**
-   * 블로킹 dequeue.
-   *
-   * Ready Queue가 비어있으면 timeout까지 대기한다.
-   * BLPOP은 Lua 스크립트 내에서 사용할 수 없으므로,
-   * BLPOP으로 대기 후 pop된 아이템을 In-flight에 등록한다.
-   */
-  /**
-   * ⚠️ 원자성 경고: BLPOP → ZADD 사이 크래시 시 작업 유실 가능
-   *
-   * BLPOP은 Lua 스크립트 내에서 사용할 수 없으므로(blocking 명령 제한),
-   * BLPOP과 ZADD를 원자적으로 묶을 수 없다.
-   *
-   * 유실 시나리오:
-   *   1. BLPOP으로 job-001을 Ready Queue에서 꺼냄
-   *   2. (이 시점에서 프로세스 크래시)
-   *   3. In-flight Queue에 등록되지 않음 → Orphan Recovery 대상에서도 제외
-   *   4. job-001 영구 유실
-   *
-   * 대안:
-   *   - Redis Stream의 XREADGROUP + Consumer Group 사용 (운영 고려사항 참조)
-   *   - non-blocking dequeue()를 사용하면 Lua 스크립트로 원자적 처리 가능
-   *     (LPOP + ZADD를 하나의 Lua에서 수행. 대기는 Fetcher 루프에서 sleep으로 대체)
-   */
-  async blockingDequeue(workerId: string, timeoutSec: number): Promise<DequeueResult | null> {
-    // 1. BLPOP으로 대기
-    const result = await this.redis.blpop('ready-queue', timeoutSec);
-    if (!result) return null;
-
-    const jobId = result[1];
-
-    // 2. In-flight Queue에 등록
-    const now = Date.now();
-    const deadline = now + this.config.reliableQueue.ackTimeoutMs;
-
-    await this.redis.zadd('in-flight-queue', deadline.toString(), jobId);
-
-    // 3. 메타데이터 저장 (retryCount 포함 — Issue #7 참조)
-    const metaKey = `in-flight:${jobId}`;
-    const ttlSec = Math.ceil(this.config.reliableQueue.ackTimeoutMs / 1000) + 60;
-
-    // Job Hash에서 retryCount와 groupId를 조회하여 메타데이터에 포함시킨다.
-    // recover_orphans.lua에서 retryCount 기반 Dead Letter 판정에 사용된다.
-    const [retryCount, groupId] = await Promise.all([
-      this.redis.hget(`job:${jobId}`, 'retryCount'),
-      this.redis.hget(`job:${jobId}`, 'groupId'),
-    ]);
-
-    await this.redis.hmset(metaKey, {
-      jobId,
-      workerId,
-      instanceId: this.instanceId,
-      groupId: groupId ?? '',
-      retryCount: retryCount ?? '0',
-      startedAt: now.toString(),
-      deadline: deadline.toString(),
-    });
-    await this.redis.expire(metaKey, ttlSec);
-
-    this.logger.debug(
-      `Blocking dequeued job ${jobId} (worker=${workerId})`,
-    );
-
-    return { jobId, deadline };
-  }
-
-  /**
-   * 작업 완료 확인(ACK).
-   *
-   * @returns true면 정상 ACK, false면 이미 만료됨 (orphan 복구로 인해)
-   */
-  async ack(jobId: string): Promise<boolean> {
-    try {
-      const removed = await (this.redis as any).ack_job(
-        'in-flight-queue',
-        'in-flight',
-        jobId,
-      );
-
-      const isNormalAck = removed === 1;
-
-      if (!isNormalAck) {
-        this.logger.warn(
-          `Late ACK for job ${jobId} (already recovered as orphan)`,
-        );
-      }
-
-      return isNormalAck;
-    } catch (error) {
-      this.logger.error(`ACK failed for job ${jobId}: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  /**
-   * 작업 실패 보고(NACK).
-   *
-   * In-flight에서 제거하고 Non-ready Queue(재시도) 또는
-   * Dead Letter Queue(최대 재시도 초과)로 이동한다.
-   *
-   * ⚠️ Step 3 CongestionControlService.addToNonReady()를 호출하여
-   * 혼잡 제어 backoff가 적용된 Non-ready Queue에 넣는다.
-   * CongestionControlService를 주입받지 않은 경우 Ready Queue에 직접 넣는다.
-   */
-  async nack(jobId: string, groupId: string, retryCount: number): Promise<void> {
-    // 1. In-flight에서 제거
-    await this.redis.zrem('in-flight-queue', jobId);
-    await this.redis.del(`in-flight:${jobId}`);
-
-    if (retryCount < this.config.reliableQueue.maxRetryCount) {
-      // 2a. 재시도: retryCount 갱신 후 Non-ready Queue로
-      await this.redis.hincrby(`job:${jobId}`, 'retryCount', 1);
-      await this.redis.hset(`job:${jobId}`, 'status', 'PENDING');
-
-      // Step 3 혼잡 제어 backoff 적용하여 Non-ready Queue에 넣는다.
-      // CongestionControlService가 주입되어 있으면 addToNonReady() 사용,
-      // 없으면 Ready Queue에 직접 복귀 (backoff 없는 즉시 재시도).
-      if (this.congestionControl) {
-        await this.congestionControl.addToNonReady(jobId, groupId, retryCount + 1);
-      } else {
-        await this.redis.rpush('ready-queue', jobId);
-      }
-
-      this.logger.debug(
-        `NACK job ${jobId}: requeueing (retry ${retryCount + 1}/${this.config.reliableQueue.maxRetryCount})`,
-      );
-    } else {
-      // 2b. Dead Letter: 최대 재시도 초과
-      await this.redis.hset(`job:${jobId}`, 'status', 'FAILED');
-
-      const entry = JSON.stringify({
-        jobId,
-        groupId,
-        retryCount,
-        error: 'max retries exceeded',
-        failedAt: Date.now(),
-      });
-      await this.redis.rpush('dead-letter-queue', entry);
-
-      this.logger.warn(
-        `NACK job ${jobId}: max retries exceeded, moved to Dead Letter`,
-      );
-    }
-  }
-
-  /**
-   * ACK deadline을 연장한다 (Heartbeat).
-   *
-   * 오래 걸리는 작업에서 Worker가 주기적으로 호출하여
-   * orphan 판정을 방지한다.
-   */
-  /**
-   * ACK deadline을 연장한다 (Heartbeat).
-   *
-   * ⚠️ 원자성 문제 수정:
-   * 기존 코드는 ZSCORE → ZADD를 별도 명령으로 실행하여,
-   * 두 명령 사이에 OrphanRecovery가 ZREM으로 작업을 제거하면
-   * ZADD가 이미 복구된 작업을 In-flight에 다시 등록하는 Race condition이 발생한다.
-   *
-   * Lua 스크립트로 "존재하면 갱신" 을 원자적으로 수행한다.
-   */
-  async extendDeadline(jobId: string, extensionMs?: number): Promise<boolean> {
-    const extension = extensionMs ?? this.config.reliableQueue.ackTimeoutMs;
-    const newDeadline = Date.now() + extension;
-
-    // Lua 스크립트로 원자적 갱신: ZSCORE 확인 + ZADD + HSET
-    const script = `
-      local exists = redis.call('ZSCORE', KEYS[1], ARGV[1])
-      if not exists then
-        return 0
-      end
-      redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
-      redis.call('HSET', KEYS[2] .. ':' .. ARGV[1], 'deadline', ARGV[2])
-      return 1
-    `;
-
-    const result = await this.redis.eval(
-      script, 2,
-      'in-flight-queue', 'in-flight',
-      jobId, newDeadline.toString(),
-    );
-
-    const extended = result === 1;
-
-    if (extended) {
-      this.logger.debug(`Extended deadline for job ${jobId} to ${new Date(newDeadline).toISOString()}`);
-    } else {
-      this.logger.warn(
-        `extendDeadline failed for job ${jobId}: not in In-flight Queue ` +
-        `(이미 OrphanRecovery에 의해 복구되었을 수 있다)`,
-      );
-    }
-
-    return extended;
+    private readonly keys: RedisKeyBuilder,
+  ) {
+    this.instanceId = randomUUID();
   }
 
   getInstanceId(): string {
     return this.instanceId;
+  }
+
+  /**
+   * Non-blocking dequeue. Ready Queue에서 작업을 꺼내고 In-flight Queue에 등록한다.
+   *
+   * LINDEX로 peek → Job Hash에서 retryCount/groupId pre-fetch → Lua 원자적 LPOP+ZADD.
+   * peek과 실제 LPOP이 다를 수 있으나(race), recover-orphans.lua가 메타데이터 fallback
+   * 조회하므로 안전하다.
+   */
+  async dequeue(workerId: string): Promise<DequeueResult | null> {
+    const readyQueueKey = this.keys.readyQueue();
+    const length = await this.redisService.list.length(readyQueueKey);
+    if (length === 0) return null;
+
+    // Pre-fetch retryCount/groupId via LINDEX peek
+    const peekResult = await this.redisService.list.range(readyQueueKey, 0, 0);
+    let retryCount = '0';
+    let groupId = '';
+
+    if (peekResult.length > 0) {
+      const peekJobId = peekResult[0];
+      const jobKey = this.keys.job(peekJobId);
+      retryCount = (await this.redisService.hash.get(jobKey, 'retryCount')) ?? '0';
+      groupId = (await this.redisService.hash.get(jobKey, 'groupId')) ?? '';
+    }
+
+    const result = await this.redisService.callCommand(
+      'reliableDequeue',
+      [readyQueueKey, this.keys.inFlightQueue(), this.keys.inFlightMetaPrefix()],
+      [this.config.reliableQueue.ackTimeoutMs.toString(), workerId, this.instanceId, retryCount, groupId],
+    );
+
+    if (!result) return null;
+
+    const [jobId, deadline] = result as string[];
+    return { jobId, deadline: parseInt(deadline, 10) };
+  }
+
+  /** @returns true면 정상 ACK, false면 late ACK (이미 orphan 복구됨) */
+  async ack(jobId: string): Promise<boolean> {
+    const result = await this.redisService.callCommand(
+      'reliableAck',
+      [this.keys.inFlightQueue(), this.keys.inFlightMetaPrefix()],
+      [jobId],
+    );
+    const removed = result === 1;
+    if (!removed) {
+      this.logger.warn(`Late ACK for job ${jobId} (already recovered)`);
+    }
+    return removed;
+  }
+
+  /** In-flight 제거만 수행. retry/DLQ 판정은 WorkerPoolService.handleJobFailed()가 담당. */
+  async nack(jobId: string): Promise<void> {
+    await this.redisService.callCommand(
+      'reliableAck',
+      [this.keys.inFlightQueue(), this.keys.inFlightMetaPrefix()],
+      [jobId],
+    );
+  }
+
+  /** Lua extend-deadline.lua로 원자적 deadline 연장 (heartbeat용). */
+  async extendDeadline(jobId: string, extensionMs?: number): Promise<boolean> {
+    const extension = extensionMs ?? this.config.reliableQueue.ackTimeoutMs;
+    const result = await this.redisService.callCommand(
+      'extendDeadline',
+      [this.keys.inFlightQueue(), this.keys.inFlightMetaPrefix()],
+      [jobId, extension.toString()],
+    );
+    return result === 1;
   }
 }
 ```
 
 ### Orphan Recovery Service
 
-**`reliable-queue/orphan-recovery.service.ts`**
+**`reliable-queue/OrphanRecoveryService.ts`**
+
+`AggregatorService`와 `FairQueueService`를 직접 주입받아, Dead Letter 이동된 orphan에 대해 집계 + Fair Queue ACK을 수행한다. 이것이 설계 문서에서 확인된 **집계 갭**을 해결하는 핵심 로직이다.
 
 ```typescript
-import { Injectable, Inject, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
+import { AggregatorService } from '../aggregator/AggregatorService';
+import { FairQueueService } from '../fair-queue/FairQueueService';
+
+export interface OrphanRecoveryStats {
+  totalCycles: number;
+  totalRecovered: number;
+  totalDeadLettered: number;
+}
 
 @Injectable()
 export class OrphanRecoveryService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OrphanRecoveryService.name);
-  private intervalHandle: NodeJS.Timeout | null = null;
-  private isRecovering = false;
-
-  private stats = {
+  private intervalHandle: ReturnType<typeof setInterval> | null = null;
+  private stats: OrphanRecoveryStats = {
     totalCycles: 0,
     totalRecovered: 0,
     totalDeadLettered: 0,
   };
 
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly keys: RedisKeyBuilder,
+    private readonly aggregatorService: AggregatorService,
+    private readonly fairQueue: FairQueueService,
   ) {}
 
-  onModuleInit(): void {
-    this.start();
-  }
-
-  onModuleDestroy(): void {
-    this.stop();
-  }
+  async onModuleInit(): Promise<void> { this.start(); }
+  async onModuleDestroy(): Promise<void> { this.stop(); }
 
   start(): void {
     if (this.intervalHandle) return;
-
     this.intervalHandle = setInterval(
-      () => this.recoveryCycle(),
+      () => void this.runOnce(),
       this.config.reliableQueue.orphanRecoveryIntervalMs,
-    );
-
-    this.logger.log(
-      `Orphan Recovery started (interval=${this.config.reliableQueue.orphanRecoveryIntervalMs}ms)`,
     );
   }
 
@@ -1186,57 +1032,64 @@ export class OrphanRecoveryService implements OnModuleInit, OnModuleDestroy {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
     }
-    this.logger.log('Orphan Recovery stopped');
   }
 
-  getStats(): typeof this.stats {
+  async runOnce(): Promise<{ recovered: number; deadLettered: number }> {
+    const nowMs = Date.now();
+    const jobKeyPrefix = this.keys.getPrefix() + 'job:';
+
+    const result = (await this.redisService.callCommand(
+      'recoverOrphans',
+      [this.keys.inFlightQueue(), this.keys.readyQueue(),
+       this.keys.deadLetterQueue(), this.keys.inFlightMetaPrefix()],
+      [nowMs.toString(), this.config.reliableQueue.orphanRecoveryBatchSize.toString(),
+       this.config.reliableQueue.maxRetryCount.toString(), jobKeyPrefix],
+    )) as number[];
+
+    const recovered = Number(result[0]);
+    const deadLettered = Number(result[1]);
+
+    this.stats.totalCycles++;
+    this.stats.totalRecovered += recovered;
+    this.stats.totalDeadLettered += deadLettered;
+
+    // deadLettered orphan 집계 처리
+    if (deadLettered > 0) {
+      const pairs = result.slice(2).map(String);
+      await this.handleDeadLetteredOrphans(pairs);
+    }
+
+    return { recovered, deadLettered };
+  }
+
+  getStats(): OrphanRecoveryStats {
     return { ...this.stats };
   }
 
   /**
-   * 수동으로 1회 복구 사이클을 실행한다 (테스트, 운영용).
+   * Dead Letter로 이동된 orphan에 대해:
+   * 1. AggregatorService.recordJobResult()로 실패 집계
+   * 2. FairQueueService.ack()로 Fair Queue 완료 처리
+   * 3. 그룹 완료 시 AggregatorService.finalizeGroup()
+   *
+   * ⚠️ ack.lua가 항상 job status를 COMPLETED로 설정하므로,
+   * recover-orphans.lua에서 설정한 FAILED 상태는 덮어씌워진다.
    */
-  async runOnce(): Promise<{ recovered: number; deadLettered: number }> {
-    return this.recoveryCycle();
-  }
+  private async handleDeadLetteredOrphans(pairs: string[]): Promise<void> {
+    for (let i = 0; i < pairs.length; i += 2) {
+      const jobId = pairs[i];
+      const groupId = pairs[i + 1];
 
-  // --- Private ---
+      await this.aggregatorService.recordJobResult({
+        jobId, groupId, success: false, durationMs: 0,
+        processorType: '',
+        error: { message: 'orphan: max retries exceeded', retryable: false },
+      });
 
-  private async recoveryCycle(): Promise<{ recovered: number; deadLettered: number }> {
-    if (this.isRecovering) return { recovered: 0, deadLettered: 0 };
-    this.isRecovering = true;
-
-    try {
-      this.stats.totalCycles++;
-
-      const result = await (this.redis as any).recover_orphans(
-        'in-flight-queue',
-        'ready-queue',
-        'dead-letter-queue',
-        'in-flight',
-        Date.now().toString(),
-        this.config.reliableQueue.orphanRecoveryBatchSize.toString(),
-        this.config.reliableQueue.maxRetryCount.toString(),
-      );
-
-      const recovered = result[0];
-      const deadLettered = result[1];
-
-      this.stats.totalRecovered += recovered;
-      this.stats.totalDeadLettered += deadLettered;
-
-      if (recovered > 0 || deadLettered > 0) {
-        this.logger.log(
-          `Orphan recovery: ${recovered} recovered, ${deadLettered} dead-lettered`,
-        );
+      const isGroupCompleted = await this.fairQueue.ack(jobId, groupId);
+      if (isGroupCompleted) {
+        await this.aggregatorService.finalizeGroup(groupId);
       }
-
-      return { recovered, deadLettered };
-    } catch (error) {
-      this.logger.error(`Orphan recovery failed: ${error.message}`, error.stack);
-      return { recovered: 0, deadLettered: 0 };
-    } finally {
-      this.isRecovering = false;
     }
   }
 }
@@ -1244,359 +1097,289 @@ export class OrphanRecoveryService implements OnModuleInit, OnModuleDestroy {
 
 ### Dead Letter Service
 
-**`reliable-queue/dead-letter.service.ts`**
+**`reliable-queue/DeadLetterService.ts`**
+
+조회/재투입/정리 전용 (DLQ 기록은 하지 않음). `removeFromDLQ()`는 전체 목록을 읽고 필터링 후 재작성하는 방식 — 소량 DLQ이므로 성능 문제 없음.
 
 ```typescript
-import { Injectable, Inject, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
 
 export interface DeadLetterEntry {
   jobId: string;
-  groupId?: string;
+  groupId: string;
   retryCount: number;
-  error?: string;
+  error: string;
   failedAt: number;
 }
 
 @Injectable()
 export class DeadLetterService {
   private readonly logger = new Logger(DeadLetterService.name);
-  private readonly queueKey = 'dead-letter-queue';
 
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly keys: RedisKeyBuilder,
   ) {}
 
-  /**
-   * Dead Letter Queue의 크기를 반환한다.
-   */
   async size(): Promise<number> {
-    return this.redis.llen(this.queueKey);
+    return this.redisService.list.length(this.keys.deadLetterQueue());
   }
 
-  /**
-   * Dead Letter 목록을 페이지네이션으로 조회한다.
-   */
-  async list(offset: number = 0, limit: number = 50): Promise<DeadLetterEntry[]> {
-    const entries = await this.redis.lrange(this.queueKey, offset, offset + limit - 1);
-    return entries.map((e) => JSON.parse(e));
+  async list(offset: number, limit: number): Promise<DeadLetterEntry[]> {
+    const raw = await this.redisService.list.range(
+      this.keys.deadLetterQueue(), offset, offset + limit - 1,
+    );
+    return raw.map((entry) => JSON.parse(entry) as DeadLetterEntry);
   }
 
-  /**
-   * Dead Letter 작업을 Ready Queue로 재투입한다 (수동 재시도).
-   *
-   * ⚠️ 성능 개선:
-   * 기존 코드는 LRANGE(0, -1)로 전체 DLQ를 로드 후 선형 탐색 → O(N).
-   * DLQ 크기가 수천 건 이상이면 심각한 성능 문제가 발생한다.
-   *
-   * 개선 방안: DLQ 보조 인덱스(Hash)를 사용하여 O(1) 조회.
-   *   - `dead-letter-index` Hash: jobId → JSON entry
-   *   - retry 시 Hash에서 삭제 + List에서 LREM
-   *   - List는 순서 보존/페이지네이션용, Hash는 단건 조회용
-   *
-   * 아래는 보조 인덱스 도입 전의 개선 코드로,
-   * 최소한 전체 로드 대신 SCAN 기반 배치 탐색을 수행한다.
-   */
   async retry(jobId: string): Promise<boolean> {
-    // 배치 단위로 DLQ를 탐색하여 메모리 사용량 제한
-    const BATCH_SIZE = 100;
-    let offset = 0;
+    const dlqKey = this.keys.deadLetterQueue();
+    const entries = await this.redisService.list.range(dlqKey, 0, -1);
 
-    while (true) {
-      const entries = await this.redis.lrange(this.queueKey, offset, offset + BATCH_SIZE - 1);
-      if (entries.length === 0) break;
-
-      for (const entry of entries) {
-        const parsed: DeadLetterEntry = JSON.parse(entry);
-        if (parsed.jobId === jobId) {
-          // DLQ에서 제거
-          await this.redis.lrem(this.queueKey, 1, entry);
-
-          // Job 상태 리셋
-          const jobKey = `job:${jobId}`;
-          await this.redis.hmset(jobKey, {
-            status: 'PENDING',
-            retryCount: '0',
-          });
-
-          // Ready Queue에 추가
-          await this.redis.rpush('ready-queue', jobId);
-
-          this.logger.log(`Dead letter job ${jobId} requeued for retry`);
-          return true;
-        }
+    for (const entry of entries) {
+      const parsed = JSON.parse(entry) as DeadLetterEntry;
+      if (parsed.jobId === jobId) {
+        await this.redisService.hash.set(this.keys.job(jobId), 'retryCount', '0');
+        await this.redisService.hash.set(this.keys.job(jobId), 'status', 'PENDING');
+        await this.redisService.list.append(this.keys.readyQueue(), jobId);
+        await this.removeFromDLQ(entry);
+        return true;
       }
-
-      offset += entries.length;
-      if (entries.length < BATCH_SIZE) break;
     }
-
     return false;
   }
 
-  /**
-   * 전체 Dead Letter를 Ready Queue로 재투입한다 (일괄 재시도).
-   */
   async retryAll(): Promise<number> {
+    const dlqKey = this.keys.deadLetterQueue();
     let count = 0;
-    let entry: string | null;
-
-    while ((entry = await this.redis.lpop(this.queueKey)) !== null) {
-      const parsed: DeadLetterEntry = JSON.parse(entry);
-
-      const jobKey = `job:${parsed.jobId}`;
-      await this.redis.hmset(jobKey, {
-        status: 'PENDING',
-        retryCount: '0',
-      });
-
-      await this.redis.rpush('ready-queue', parsed.jobId);
+    while (true) {
+      const entry = await this.redisService.list.popHead(dlqKey);
+      if (!entry) break;
+      const parsed = JSON.parse(entry) as DeadLetterEntry;
+      await this.redisService.hash.set(this.keys.job(parsed.jobId), 'retryCount', '0');
+      await this.redisService.hash.set(this.keys.job(parsed.jobId), 'status', 'PENDING');
+      await this.redisService.list.append(this.keys.readyQueue(), parsed.jobId);
       count++;
     }
-
-    this.logger.log(`Retried all ${count} dead letter jobs`);
     return count;
   }
 
-  /**
-   * Dead Letter를 영구 삭제한다.
-   *
-   * ⚠️ retry()와 동일한 성능 주의사항 적용. 배치 탐색 사용.
-   */
   async purge(jobId: string): Promise<boolean> {
-    const BATCH_SIZE = 100;
-    let offset = 0;
-
-    while (true) {
-      const entries = await this.redis.lrange(this.queueKey, offset, offset + BATCH_SIZE - 1);
-      if (entries.length === 0) break;
-
-      for (const entry of entries) {
-        const parsed: DeadLetterEntry = JSON.parse(entry);
-        if (parsed.jobId === jobId) {
-          await this.redis.lrem(this.queueKey, 1, entry);
-          this.logger.log(`Purged dead letter job ${jobId}`);
-          return true;
-        }
+    const dlqKey = this.keys.deadLetterQueue();
+    const entries = await this.redisService.list.range(dlqKey, 0, -1);
+    for (const entry of entries) {
+      const parsed = JSON.parse(entry) as DeadLetterEntry;
+      if (parsed.jobId === jobId) {
+        await this.removeFromDLQ(entry);
+        return true;
       }
-
-      offset += entries.length;
-      if (entries.length < BATCH_SIZE) break;
     }
     return false;
   }
 
-  /**
-   * 오래된 Dead Letter를 정리한다.
-   *
-   * ⚠️ 배치 탐색으로 전체 로드 방지.
-   * LREM 후 인덱스가 변경되므로, 삭제된 항목 수만큼 offset을 보정하지 않는다.
-   * (LREM이 1개만 제거하므로, 다음 배치에서 같은 offset부터 다시 읽어도 안전)
-   */
   async cleanup(olderThanMs?: number): Promise<number> {
-    const threshold = Date.now() - (olderThanMs ?? this.config.reliableQueue.deadLetterRetentionMs);
-    const BATCH_SIZE = 100;
+    const retention = olderThanMs ?? this.config.reliableQueue.deadLetterRetentionMs;
+    const cutoff = Date.now() - retention;
+    const dlqKey = this.keys.deadLetterQueue();
+    const entries = await this.redisService.list.range(dlqKey, 0, -1);
     let removed = 0;
-    let offset = 0;
-
-    while (true) {
-      const entries = await this.redis.lrange(this.queueKey, offset, offset + BATCH_SIZE - 1);
-      if (entries.length === 0) break;
-
-      let removedInBatch = 0;
-      for (const entry of entries) {
-        const parsed: DeadLetterEntry = JSON.parse(entry);
-        if (parsed.failedAt < threshold) {
-          await this.redis.lrem(this.queueKey, 1, entry);
-          removed++;
-          removedInBatch++;
-        }
+    for (const entry of entries) {
+      const parsed = JSON.parse(entry) as DeadLetterEntry;
+      if (parsed.failedAt < cutoff) {
+        await this.removeFromDLQ(entry);
+        removed++;
       }
-
-      // LREM으로 항목이 제거되면 리스트가 줄어들므로
-      // 제거되지 않은 항목 수만큼만 offset을 증가시킨다.
-      offset += entries.length - removedInBatch;
-      if (entries.length < BATCH_SIZE) break;
-    }
-
-    if (removed > 0) {
-      this.logger.log(`Cleaned up ${removed} old dead letter entries`);
     }
     return removed;
+  }
+
+  private async removeFromDLQ(entryJson: string): Promise<void> {
+    const dlqKey = this.keys.deadLetterQueue();
+    const allEntries = await this.redisService.list.range(dlqKey, 0, -1);
+    const filtered = allEntries.filter((e) => e !== entryJson);
+    await this.redisService.delete(dlqKey);
+    for (const entry of filtered) {
+      await this.redisService.list.append(dlqKey, entry);
+    }
   }
 }
 ```
 
 ### Idempotency Service
 
-**`idempotency/idempotency.service.ts`**
+**`idempotency/IdempotencyService.ts`**
+
+`RedisService.string.setNX()`를 사용하여 원자적 확인+마킹. `filterUnprocessed()`는 순차 호출 방식.
 
 ```typescript
-import { Injectable, Inject, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
-import { REDIS_CLIENT, BULK_ACTION_CONFIG } from '../redis/redis.provider';
-import { BulkActionConfig } from '../config/bulk-action.config';
+import { Inject, Injectable } from '@nestjs/common';
+import { RedisService } from '@app/redis/RedisService';
+import { BULK_ACTION_CONFIG, BulkActionConfig } from '../config/BulkActionConfig';
+import { RedisKeyBuilder } from '../key/RedisKeyBuilder';
 
 @Injectable()
 export class IdempotencyService {
-  private readonly logger = new Logger(IdempotencyService.name);
-
   constructor(
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly redisService: RedisService,
     @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
+    private readonly keys: RedisKeyBuilder,
   ) {}
 
   /**
-   * 작업이 이미 처리되었는지 확인하고, 처리되지 않았다면 마킹한다.
-   *
-   * SET NX로 원자적으로:
-   *   - 키가 없으면 → 생성하고 false 반환 (아직 처리 안 됨)
-   *   - 키가 있으면 → true 반환 (이미 처리됨)
-   *
-   * @param key 멱등성 키 (예: "promotion:customer-A:job-001")
-   * @returns true면 이미 처리됨 → 스킵해야 함
+   * 원자적으로 처리 여부를 확인하고 마킹한다.
+   * @returns true이면 이미 처리됨 (중복), false이면 미처리 (첫 실행)
    */
   async isProcessed(key: string): Promise<boolean> {
     const ttlSec = Math.ceil(this.config.reliableQueue.idempotencyTtlMs / 1000);
-    const result = await this.redis.set(
-      `idempotency:${key}`,
-      Date.now().toString(),
-      'EX',
-      ttlSec,
-      'NX',
-    );
-
-    // SET NX: 'OK'이면 새로 생성됨(처리 안 됨), null이면 이미 존재(처리됨)
-    return result !== 'OK';
+    const redisKey = this.keys.idempotency(key);
+    const acquired = await this.redisService.string.setNX(redisKey, '1', ttlSec);
+    // setNX가 true(OK)이면 첫 실행 → isProcessed=false
+    return !acquired;
   }
 
-  /**
-   * 멱등성 마킹을 수동으로 제거한다.
-   * 작업 결과를 무효화하고 재처리할 때 사용한다.
-   */
-  async reset(key: string): Promise<boolean> {
-    const deleted = await this.redis.del(`idempotency:${key}`);
-    return deleted === 1;
+  async reset(key: string): Promise<void> {
+    await this.redisService.delete(this.keys.idempotency(key));
   }
 
-  /**
-   * 여러 키의 처리 여부를 일괄 확인한다.
-   */
   async filterUnprocessed(keys: string[]): Promise<string[]> {
-    const unprocessed: string[] = [];
-
-    // 파이프라인으로 일괄 조회
-    const pipeline = this.redis.pipeline();
+    const result: string[] = [];
     for (const key of keys) {
-      pipeline.exists(`idempotency:${key}`);
-    }
-    const results = await pipeline.exec();
-
-    for (let i = 0; i < keys.length; i++) {
-      const [err, exists] = results![i];
-      if (!err && exists === 0) {
-        unprocessed.push(keys[i]);
+      const processed = await this.isProcessed(key);
+      if (!processed) {
+        result.push(key);
       }
     }
-
-    return unprocessed;
+    return result;
   }
 }
 ```
 
 ### 모듈 등록 (최종)
 
-**`bulk-action.module.ts`**
+**`BulkActionModule.ts`**
+
+`RedisModule.register()` import + `reliableQueue` config merge + 5개 신규 서비스 등록.
 
 ```typescript
 import { DynamicModule, Module } from '@nestjs/common';
-// ... 모든 import
+import { RedisModule } from '@app/redis/RedisModule';
+// ... 기존 import 생략
+import { ReliableQueueService } from './reliable-queue/ReliableQueueService';
+import { InFlightQueueService } from './reliable-queue/InFlightQueueService';
+import { OrphanRecoveryService } from './reliable-queue/OrphanRecoveryService';
+import { DeadLetterService } from './reliable-queue/DeadLetterService';
+import { IdempotencyService } from './idempotency/IdempotencyService';
 
 @Module({})
 export class BulkActionModule {
-  static register(config?: Partial<BulkActionConfig>): DynamicModule {
-    const mergedConfig = this.mergeConfig(config);
+  static register(
+    config: { redis: BulkActionRedisConfig } & {
+      fairQueue?: Partial<FairQueueConfig>;
+      backpressure?: Partial<BackpressureConfig>;
+      congestion?: Partial<CongestionConfig>;
+      workerPool?: Partial<WorkerPoolConfig>;
+      aggregator?: Partial<AggregatorConfig>;
+      watcher?: Partial<WatcherConfig>;
+      reliableQueue?: Partial<ReliableQueueConfig>;
+    },
+  ): DynamicModule {
+    const mergedConfig: BulkActionConfig = {
+      redis: config.redis,
+      // ... 기존 config merge 생략
+      reliableQueue: {
+        ...DEFAULT_RELIABLE_QUEUE_CONFIG,
+        ...config.reliableQueue,
+      },
+    };
 
     return {
       module: BulkActionModule,
+      imports: [RedisModule.register({ /* redis config */ })],
       providers: [
         { provide: BULK_ACTION_CONFIG, useValue: mergedConfig },
-        redisProvider,
-        LuaScriptLoader,
-        // Step 1: Fair Queue
-        FairQueueService,
-        // Step 2: Backpressure
-        RateLimiterService, ReadyQueueService, NonReadyQueueService, BackpressureService,
-        // Step 3: Congestion Control
-        CongestionControlService, CongestionStatsService,
-        // Step 4: Worker Pool
-        FetcherService, DispatcherService, WorkerPoolService,
-        // Step 5: Aggregator & Watcher
-        DistributedLockService, AggregatorService, WatcherService, DefaultAggregator,
-        { provide: AGGREGATOR, useFactory: (d: DefaultAggregator) => [d], inject: [DefaultAggregator] },
+        RedisKeyBuilder, LuaScriptLoader,
+        // Step 1~5 기존 서비스 생략
         // Step 6: Reliable Queue
         ReliableQueueService,
         InFlightQueueService,
         OrphanRecoveryService,
         DeadLetterService,
         IdempotencyService,
+        // ... WorkerPoolService 등
       ],
       exports: [
-        FairQueueService,
-        BackpressureService,
-        ReadyQueueService,
-        WorkerPoolService,
-        AggregatorService,
-        DistributedLockService,
+        // ... 기존 exports
         ReliableQueueService,
+        InFlightQueueService,
         DeadLetterService,
         IdempotencyService,
+        // OrphanRecoveryService는 내부 전용 (export하지 않음)
       ],
     };
   }
-
-  // ... registerProcessors, registerAggregators, mergeConfig 생략
 }
+```
+
+### LuaScriptLoader 등록
+
+**`lua/LuaScriptLoader.ts`**에 4개 신규 스크립트 등록:
+
+```typescript
+await this.loadScript('reliableDequeue', 'reliable-dequeue.lua', 3);
+await this.loadScript('reliableAck', 'reliable-ack.lua', 2);
+await this.loadScript('recoverOrphans', 'recover-orphans.lua', 4);
+await this.loadScript('extendDeadline', 'extend-deadline.lua', 2);
 ```
 
 ---
 
 ## Step 1~5와의 연동
 
-### Worker 변경: pop → reliable dequeue
+### Worker 변경: blockingPop → reliable dequeue + poll+sleep
 
-Step 4의 Worker에서 `readyQueue.blockingPop()`을 `reliableQueue.blockingDequeue()`로 교체한다.
+Step 4의 Worker에서 `ReadyQueueService` 의존성을 제거하고, **콜백 기반** reliable queue 패턴으로 교체한다. BLPOP 대신 non-blocking `dequeue()` + `setTimeout(pollIntervalMs)` 패턴을 사용한다.
 
-**변경 전 (Step 4):**
+**Worker.ts 생성자 시그니처:**
 
 ```typescript
-// worker.ts
-private async tick(): Promise<void> {
-  const jobId = await this.readyQueue.blockingPop(this.options.timeoutSec);
-  if (!jobId) return;
-  // ...
-}
+constructor(
+  readonly id: number,
+  private readonly processorMap: Map<string, JobProcessor>,
+  private readonly options: {
+    jobTimeoutMs: number;
+    pollIntervalMs: number;        // NEW (replaces timeoutSec)
+    onJobComplete: (result: JobProcessorResponse) => Promise<void>;
+    onJobFailed: (job: Job, error: Error) => Promise<void>;
+    loadJobData: (jobId: string) => Promise<Record<string, string> | null>;
+    reliableDequeue: (workerId: string) => Promise<DequeueResult | null>;  // NEW
+    reliableAck: (jobId: string) => Promise<boolean>;                      // NEW
+    reliableNack: (jobId: string) => Promise<void>;                        // NEW
+    extendDeadline: (jobId: string) => Promise<boolean>;                   // NEW
+  },
+)
 ```
 
-**변경 후 (Step 6):**
+**tick() 핵심 흐름:**
 
 ```typescript
-// worker.ts
 private async tick(): Promise<void> {
-  // 1. Reliable dequeue: pop + In-flight 등록
-  const result = await this.reliableQueue.blockingDequeue(
-    `worker-${this.id}`,
-    this.options.timeoutSec,
-  );
-  if (!result) return;
+  const workerId = `worker-${this.id}`;
+  const dequeueResult = await this.options.reliableDequeue(workerId);
 
-  const { jobId, deadline } = result;
+  if (!dequeueResult) {
+    await setTimeout(this.options.pollIntervalMs);  // poll+sleep 패턴
+    return;
+  }
+
+  const { jobId } = dequeueResult;
   const job = await this.loadJob(jobId);
+
   if (!job) {
-    await this.reliableQueue.ack(jobId); // 데이터 없는 작업은 ACK로 제거
+    await this.options.reliableAck(jobId);  // 데이터 없는 작업은 cleanup
     return;
   }
 
@@ -1604,54 +1387,59 @@ private async tick(): Promise<void> {
   const startTime = Date.now();
 
   try {
-    const processor = this.processorMap.get(job.type);
-    if (!processor) throw new Error(`No processor for type: ${job.type}`);
+    const processor = this.processorMap.get(job.processorType);
+    if (!processor) throw new Error(`No processor for: ${job.processorType}`);
 
-    // 2. 실행 (장시간 작업이면 heartbeat 포함)
-    const jobResult = await this.executeWithHeartbeat(processor, job, deadline);
-    jobResult.durationMs = Date.now() - startTime;
+    // heartbeat 포함 실행
+    const result = await this.executeWithHeartbeat(processor, job, jobId);
+    result.durationMs = Date.now() - startTime;
 
-    // 3. ACK (In-flight에서 제거)
-    const isNormalAck = await this.reliableQueue.ack(jobId);
-    if (!isNormalAck) {
-      this.logger.warn(`Late ACK for ${jobId}, result may be duplicated`);
+    // 결과에 따라 ACK 또는 NACK
+    if (result.success) {
+      await this.options.reliableAck(jobId);
+      await this.options.onJobComplete(result);
+    } else if (result.error?.retryable) {
+      await this.options.reliableNack(jobId);
+      await this.options.onJobFailed(job, new Error(result.error.message));
+    } else {
+      await this.options.reliableAck(jobId);
+      await this.options.onJobComplete(result);
     }
-
-    // 4. 결과 처리
-    await this.options.onJobComplete(jobResult);
-
   } catch (error) {
-    // 5. NACK
-    await this.reliableQueue.nack(jobId, job.groupId, job.retryCount);
-    await this.options.onJobFailed(job, error);
+    await this.options.reliableNack(jobId);
+    await this.options.onJobFailed(job, error as Error);
   } finally {
     this.currentJob = null;
   }
 }
+```
 
-/**
- * 장시간 작업에서 주기적으로 deadline을 연장한다.
- */
+**executeWithHeartbeat — 주기적 deadline 연장:**
+
+```typescript
 private async executeWithHeartbeat(
-  processor: JobProcessor,
-  job: Job,
-  deadline: number,
+  processor: JobProcessor, job: Job, jobId: string,
 ): Promise<JobProcessorResponse> {
-  const heartbeatInterval = Math.floor(
-    this.options.jobTimeoutMs * 0.6, // timeout의 60% 시점마다 연장
-  );
-
-  const heartbeat = setInterval(async () => {
-    await this.reliableQueue.extendDeadline(job.id);
-  }, heartbeatInterval);
+  const heartbeatIntervalMs = Math.floor(this.options.jobTimeoutMs * 0.6);
+  const heartbeatHandle = setInterval(() => {
+    void this.options.extendDeadline(jobId).catch((err) => {
+      this.logger.warn(`Failed to extend deadline for ${jobId}: ${(err as Error).message}`);
+    });
+  }, heartbeatIntervalMs);
 
   try {
     return await this.executeWithTimeout(processor, job);
   } finally {
-    clearInterval(heartbeat);
+    clearInterval(heartbeatHandle);
   }
 }
 ```
+
+> **설계 결정: nack()은 In-flight 제거만 수행**
+>
+> `reliableNack()`은 `reliable-ack.lua`를 재사용하여 In-flight Queue에서만 제거한다.
+> retry/DLQ 판정은 기존 `WorkerPoolService.handleJobFailed()`가 담당한다.
+> 이로써 retry 정책이 한 곳(`WorkerPoolService`)에 집중된다.
 
 ### 전체 아키텍처 (Step 1~6 통합)
 
@@ -1682,32 +1470,35 @@ private async executeWithHeartbeat(
 │  ┌──────┼──────────────────────────────────────────────────────────┐   │
 │  │      ▼  Step 6 ★                                                │   │
 │  │ ┌──────────────────────┐                                        │   │
-│  │ │  Reliable Dequeue     │  LPOP + ZADD (원자적)                  │   │
-│  │ │  Ready → In-flight    │                                        │   │
+│  │ │  Reliable Dequeue     │  LPOP + ZADD (Lua 원자적)              │   │
+│  │ │  Ready → In-flight    │  Non-blocking + poll+sleep 패턴       │   │
 │  │ └──────────┬───────────┘                                        │   │
 │  │            │                                                    │   │
 │  │            ▼                                                    │   │
 │  │ ┌──────────────────────┐                                        │   │
 │  │ │  Worker ×N            │  Step 4                                │   │
-│  │ │  process() + heartbeat│                                        │   │
+│  │ │  process() + heartbeat│  콜백 기반 (서비스 미주입)              │   │
 │  │ └───┬────────────┬─────┘                                        │   │
 │  │   성공          실패                                              │   │
 │  │     │             │                                              │   │
 │  │     ▼             ▼                                              │   │
 │  │   ACK           NACK                                            │   │
-│  │   (In-flight    (retry < max → Non-ready Queue)                 │   │
-│  │    에서 제거)    (retry >= max → Dead Letter Queue)              │   │
+│  │   (In-flight    (In-flight 제거만 수행)                          │   │
+│  │    에서 제거)    → handleJobFailed가 retry/DLQ 판정              │   │
 │  │     │                                                           │   │
 │  │     ▼                                                           │   │
 │  │ ┌──────────────────────┐                                        │   │
 │  │ │  Aggregator           │  Step 5                                │   │
-│  │ │  map() → 중간 결과     │                                        │   │
+│  │ │  recordJobResult()    │                                        │   │
 │  │ └──────────────────────┘                                        │   │
 │  │                                                                 │   │
 │  │ ┌──────────────────────┐                                        │   │
 │  │ │  Orphan Recovery      │  Step 6 ★                              │   │
 │  │ │  주기적 스캔            │                                        │   │
 │  │ │  timeout → Ready Queue │                                       │   │
+│  │ │  maxRetry → DLQ       │                                        │   │
+│  │ │    + Aggregator 집계   │  handleDeadLetteredOrphans()           │   │
+│  │ │    + FairQueue ACK    │                                        │   │
 │  │ └──────────────────────┘                                        │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                        │
@@ -1764,298 +1555,85 @@ Worker A        ReliableQueue     In-flight       Recovery        Worker B
 
 ## 테스트 전략
 
-### ReliableQueueService 통합 테스트
+> 모든 테스트는 **실제 Redis** 사용, `given/when/then` 주석 패턴, `beforeEach`에서 `redisService.flushDatabase()`, `--runInBand` 필수.
+> 테스트 설정은 `createTestBulkActionConfig()` 팩토리 함수 사용.
+
+### 테스트 파일 목록
+
+| 파일 | 테스트 수 | 핵심 검증 |
+|------|----------|----------|
+| `ReliableQueueService.spec.ts` | 9 | dequeue→In-flight 이동, ack/nack, extendDeadline, empty queue null |
+| `OrphanRecoveryService.spec.ts` | 4 | timeout 복구, maxRetry→DLQ+집계, 미만료 작업 무시, 누적 통계 |
+| `InFlightQueueService.spec.ts` | 7 | size, isInFlight, getEntry, getAllEntries, orphanedCount |
+| `DeadLetterService.spec.ts` | 7 | size, list 페이지네이션, retry/retryAll, purge, cleanup |
+| `IdempotencyService.spec.ts` | 6 | isProcessed, reset, filterUnprocessed, 중복 감지 |
+| `Worker.spec.ts` | 12 | reliableDequeue, ack/nack 호출 확인, heartbeat, poll+sleep |
+
+### 핵심 테스트 패턴
 
 ```typescript
-describe('ReliableQueueService (Integration)', () => {
-  let reliableQueue: ReliableQueueService;
-  let inFlightQueue: InFlightQueueService;
-  let redis: Redis;
-
-  beforeAll(async () => {
-    const module = await Test.createTestingModule({
-      imports: [
-        BulkActionModule.register({
-          redis: { host: 'localhost', port: 6379, db: 15 },
-          reliableQueue: { ackTimeoutMs: 5000, maxRetryCount: 3 },
-        }),
-      ],
-    }).compile();
-
-    reliableQueue = module.get(ReliableQueueService);
-    inFlightQueue = module.get(InFlightQueueService);
-    redis = module.get(REDIS_CLIENT);
-  });
-
-  afterEach(async () => {
-    await redis.flushdb();
-  });
-
-  it('dequeue 시 Ready Queue에서 제거되고 In-flight에 등록된다', async () => {
-    await redis.rpush('ready-queue', 'job-001');
-
-    const result = await reliableQueue.dequeue('worker-0');
-
-    expect(result).not.toBeNull();
-    expect(result!.jobId).toBe('job-001');
-
-    // Ready Queue에서 제거됨
-    expect(await redis.llen('ready-queue')).toBe(0);
-
-    // In-flight에 등록됨
-    expect(await inFlightQueue.isInFlight('job-001')).toBe(true);
-  });
-
-  it('ACK 시 In-flight에서 제거된다', async () => {
-    await redis.rpush('ready-queue', 'job-001');
-    await reliableQueue.dequeue('worker-0');
-
-    const acked = await reliableQueue.ack('job-001');
-
-    expect(acked).toBe(true);
-    expect(await inFlightQueue.isInFlight('job-001')).toBe(false);
-  });
-
-  it('이미 복구된 작업의 ACK는 false를 반환한다', async () => {
-    await redis.rpush('ready-queue', 'job-001');
-    await reliableQueue.dequeue('worker-0');
-
-    // 수동으로 In-flight에서 제거 (orphan 복구 시뮬레이션)
-    await redis.zrem('in-flight-queue', 'job-001');
-
-    const acked = await reliableQueue.ack('job-001');
-    expect(acked).toBe(false); // Late ACK
-  });
-
-  it('extendDeadline이 deadline을 갱신한다', async () => {
-    await redis.rpush('ready-queue', 'job-001');
-    const result = await reliableQueue.dequeue('worker-0');
-    const originalDeadline = result!.deadline;
-
-    await sleep(100);
-
-    const extended = await reliableQueue.extendDeadline('job-001');
-    expect(extended).toBe(true);
-
-    const newScore = await redis.zscore('in-flight-queue', 'job-001');
-    expect(parseInt(newScore!, 10)).toBeGreaterThan(originalDeadline);
-  });
-
-  it('Ready Queue가 비어있으면 null을 반환한다', async () => {
-    const result = await reliableQueue.dequeue('worker-0');
-    expect(result).toBeNull();
-  });
-});
-```
-
-### OrphanRecoveryService 통합 테스트
-
-```typescript
-describe('OrphanRecoveryService (Integration)', () => {
-  let recovery: OrphanRecoveryService;
-  let redis: Redis;
-
-  beforeAll(async () => {
-    const module = await Test.createTestingModule({
-      imports: [
-        BulkActionModule.register({
-          redis: { host: 'localhost', port: 6379, db: 15 },
-          reliableQueue: {
-            ackTimeoutMs: 1000,
-            orphanRecoveryIntervalMs: 100,
-            maxRetryCount: 2,
-          },
-        }),
-      ],
-    }).compile();
-
-    recovery = module.get(OrphanRecoveryService);
-    redis = module.get(REDIS_CLIENT);
-
-    recovery.stop(); // 자동 실행 중지
-  });
-
-  afterEach(async () => {
-    await redis.flushdb();
-  });
-
-  it('타임아웃된 작업을 Ready Queue로 복구한다', async () => {
-    // In-flight에 이미 만료된 작업 등록
-    const pastDeadline = Date.now() - 1000;
-    await redis.zadd('in-flight-queue', pastDeadline.toString(), 'job-001');
-    await redis.hmset('job:job-001', { retryCount: '0', status: 'PROCESSING' });
-
-    const result = await recovery.runOnce();
-
-    expect(result.recovered).toBe(1);
-    expect(result.deadLettered).toBe(0);
-
-    // Ready Queue에 복구됨
-    const readyJobs = await redis.lrange('ready-queue', 0, -1);
-    expect(readyJobs).toContain('job-001');
-
-    // In-flight에서 제거됨
-    const inFlight = await redis.zcard('in-flight-queue');
-    expect(inFlight).toBe(0);
-
-    // retryCount 증가
-    const retryCount = await redis.hget('job:job-001', 'retryCount');
-    expect(retryCount).toBe('1');
-  });
-
-  it('최대 재시도 초과 작업은 Dead Letter로 이동한다', async () => {
-    const pastDeadline = Date.now() - 1000;
-    await redis.zadd('in-flight-queue', pastDeadline.toString(), 'job-001');
-    await redis.hmset('job:job-001', { retryCount: '2', status: 'PROCESSING' }); // maxRetry=2
-
-    const result = await recovery.runOnce();
-
-    expect(result.recovered).toBe(0);
-    expect(result.deadLettered).toBe(1);
-
-    // Dead Letter Queue에 추가됨
-    const dlq = await redis.lrange('dead-letter-queue', 0, -1);
-    expect(dlq).toHaveLength(1);
-
-    const entry = JSON.parse(dlq[0]);
-    expect(entry.jobId).toBe('job-001');
-  });
-
-  it('아직 만료되지 않은 작업은 건드리지 않는다', async () => {
-    const futureDeadline = Date.now() + 60000;
-    await redis.zadd('in-flight-queue', futureDeadline.toString(), 'job-001');
-
-    const result = await recovery.runOnce();
-
-    expect(result.recovered).toBe(0);
-    expect(result.deadLettered).toBe(0);
-
-    // In-flight에 그대로 존재
-    const inFlight = await redis.zcard('in-flight-queue');
-    expect(inFlight).toBe(1);
-  });
-});
-```
-
-### IdempotencyService 테스트
-
-```typescript
-describe('IdempotencyService (Integration)', () => {
-  let idempotency: IdempotencyService;
-  let redis: Redis;
-
-  beforeAll(async () => {
-    const module = await Test.createTestingModule({
-      imports: [
-        BulkActionModule.register({
-          redis: { host: 'localhost', port: 6379, db: 15 },
-          reliableQueue: { idempotencyTtlMs: 5000 },
-        }),
-      ],
-    }).compile();
-
-    idempotency = module.get(IdempotencyService);
-    redis = module.get(REDIS_CLIENT);
-  });
-
-  afterEach(async () => {
-    await redis.flushdb();
-  });
-
-  it('첫 호출은 false(처리 안 됨)를 반환한다', async () => {
-    const result = await idempotency.isProcessed('promo:customer-A:job-001');
-    expect(result).toBe(false);
-  });
-
-  it('두 번째 호출은 true(이미 처리됨)를 반환한다', async () => {
-    await idempotency.isProcessed('promo:customer-A:job-001');
-    const result = await idempotency.isProcessed('promo:customer-A:job-001');
-    expect(result).toBe(true);
-  });
-
-  it('reset 후에는 다시 false를 반환한다', async () => {
-    await idempotency.isProcessed('promo:customer-A:job-001');
-    await idempotency.reset('promo:customer-A:job-001');
-
-    const result = await idempotency.isProcessed('promo:customer-A:job-001');
-    expect(result).toBe(false);
-  });
-
-  it('TTL 만료 후에는 false를 반환한다', async () => {
-    await idempotency.isProcessed('promo:customer-A:job-001');
-
-    // TTL 대기 (5초 + 여유)
-    await sleep(5500);
-
-    const result = await idempotency.isProcessed('promo:customer-A:job-001');
-    expect(result).toBe(false);
-  }, 10000);
-
-  it('filterUnprocessed가 미처리 키만 반환한다', async () => {
-    await idempotency.isProcessed('key-1'); // 처리됨
-    // key-2, key-3은 미처리
-
-    const unprocessed = await idempotency.filterUnprocessed(['key-1', 'key-2', 'key-3']);
-    expect(unprocessed).toEqual(['key-2', 'key-3']);
-  });
+// 테스트 설정 — createTestBulkActionConfig 사용
+const config = createTestBulkActionConfig({
+  reliableQueue: { ackTimeoutMs: 5000 },
 });
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+beforeAll(async () => {
+  module = await Test.createTestingModule({
+    imports: [
+      RedisModule.register({
+        host: config.redis.host,
+        port: config.redis.port,
+        password: config.redis.password,
+        db: config.redis.db,
+      }),
+    ],
+    providers: [
+      { provide: BULK_ACTION_CONFIG, useValue: config },
+      RedisKeyBuilder, LuaScriptLoader,
+      ReliableQueueService,
+    ],
+  }).compile();
+  await module.init();
+});
+
+// Job 시드 헬퍼 — keys.job(), keys.readyQueue() 사용
+async function seedJob(jobId: string, groupId: string): Promise<void> {
+  await redisService.hash.set(keys.job(jobId), 'id', jobId);
+  await redisService.hash.set(keys.job(jobId), 'groupId', groupId);
+  await redisService.hash.set(keys.job(jobId), 'retryCount', '0');
+  await redisService.hash.set(keys.job(jobId), 'processorType', 'TEST');
+  await redisService.hash.set(keys.job(jobId), 'payload', '{}');
+  await redisService.hash.set(keys.job(jobId), 'status', 'PENDING');
+  await redisService.hash.set(keys.job(jobId), 'createdAt', '0');
+  await redisService.list.append(keys.readyQueue(), jobId);
 }
 ```
 
-### Dead Letter 관리 테스트
+### OrphanRecoveryService 핵심 테스트: DLQ 집계
 
 ```typescript
-describe('DeadLetterService (Integration)', () => {
-  let deadLetter: DeadLetterService;
-  let redis: Redis;
+it('maxRetry 초과 시 DLQ로 이동하고 집계를 수행한다', async () => {
+  // given — retryCount가 이미 maxRetryCount(2)에 도달
+  await seedJob('job-002', 'group-B', 2);
+  await seedGroupMeta('group-B', 1);
+  await reliableQueue.dequeue('worker-0');
+  await new Promise((resolve) => setTimeout(resolve, 200));
 
-  beforeAll(async () => {
-    const module = await Test.createTestingModule({
-      imports: [
-        BulkActionModule.register({
-          redis: { host: 'localhost', port: 6379, db: 15 },
-        }),
-      ],
-    }).compile();
+  // when
+  const result = await service.runOnce();
 
-    deadLetter = module.get(DeadLetterService);
-    redis = module.get(REDIS_CLIENT);
-  });
+  // then
+  expect(result.recovered).toBe(0);
+  expect(result.deadLettered).toBe(1);
 
-  afterEach(async () => {
-    await redis.flushdb();
-  });
+  // DLQ에 존재해야 함
+  const dlqSize = await redisService.list.length(keys.deadLetterQueue());
+  expect(dlqSize).toBe(1);
 
-  it('retry가 DLQ에서 제거하고 Ready Queue에 추가한다', async () => {
-    await redis.rpush('dead-letter-queue', JSON.stringify({
-      jobId: 'job-001', retryCount: 3, failedAt: Date.now(),
-    }));
-    await redis.hmset('job:job-001', { status: 'FAILED', retryCount: '3' });
-
-    const retried = await deadLetter.retry('job-001');
-    expect(retried).toBe(true);
-
-    expect(await deadLetter.size()).toBe(0);
-    expect(await redis.llen('ready-queue')).toBe(1);
-    expect(await redis.hget('job:job-001', 'retryCount')).toBe('0');
-  });
-
-  it('retryAll이 모든 DLQ 작업을 Ready Queue로 이동한다', async () => {
-    for (let i = 0; i < 5; i++) {
-      await redis.rpush('dead-letter-queue', JSON.stringify({
-        jobId: `job-${i}`, retryCount: 3, failedAt: Date.now(),
-      }));
-      await redis.hmset(`job:job-${i}`, { status: 'FAILED', retryCount: '3' });
-    }
-
-    const count = await deadLetter.retryAll();
-    expect(count).toBe(5);
-    expect(await deadLetter.size()).toBe(0);
-    expect(await redis.llen('ready-queue')).toBe(5);
-  });
+  // ⚠️ Job 상태: recover-orphans.lua가 FAILED로 설정 후
+  // fairQueue.ack이 COMPLETED로 변경 (ack.lua가 항상 COMPLETED로 설정)
+  const status = await redisService.hash.get(keys.job('job-002'), 'status');
+  expect(status).toBe('COMPLETED');
 });
 ```
 
@@ -2111,6 +1689,7 @@ bulk_action_idempotency_miss_total                     # 신규 처리
 | `maxRetryCount` | 3 | 일시적 오류 비율 기반. 높으면 DLQ 감소, 무한 재시도 위험 |
 | `deadLetterRetentionMs` | 30일 | 분석 및 재처리 기간. Redis 메모리 고려 |
 | `idempotencyTtlMs` | 24시간 | 작업 중복 가능 기간. 짧으면 메모리 절약, 길면 안전 |
+| `workerPollIntervalMs` | 200 | Empty queue poll 간격. 낮으면 반응 빠르지만 CPU 사용 증가 |
 
 ### Redis Stream 대안 검토
 
@@ -2137,118 +1716,76 @@ Redis 5.0 이상을 사용할 수 있다면 Stream 기반으로 마이그레이�
 | 멱등성 키 TTL 이슈 | TTL 만료 후 중복 실행 | TTL을 벌크액션 최대 실행시간 이상으로 설정 |
 | DLQ 폭발 | 외부 API 장기 장애 | 장애 해소 후 retryAll. 알림 임계값 조정 |
 
-### Step 4/5 연동 인터페이스 정리
+### WorkerPoolService 변경
 
-Step 6은 Step 4(Worker Pool)와 Step 5(Aggregator) 모두에 영향을 미친다. 교체/추가가 필요한 포인트를 정리한다.
+**`worker-pool/WorkerPoolService.ts`**
 
-#### Step 4 Worker Pool 교체 포인트
-
-| Step 4 현재 | Step 6 교체 | 파일 |
-|-------------|-------------|------|
-| `readyQueue.blockingPop()` | `reliableQueue.blockingDequeue()` | worker.ts |
-| `handleJobComplete()`: `fairQueue.ack()` 만 호출 | + `reliableQueue.ack(jobId)` | worker-pool.service.ts |
-| `handleJobFailed()`: `backpressure.requeue()` | + `reliableQueue.nack(jobId, groupId, retryCount)` | worker-pool.service.ts |
-| `handleDeadLetter()`: `fairQueue.ack()` | + `reliableQueue.ack(jobId)` (In-flight에서 제거) | worker-pool.service.ts |
-| Graceful Shutdown: Worker 정지 대기 | + 미완료 In-flight 작업 복원 | worker-pool.service.ts |
+- `ReadyQueueService` 의존성 제거, `ReliableQueueService` 주입 추가
+- `createWorkers()`: 콜백 기반으로 reliable queue 전달
+- `handleJobComplete()`: Worker가 ACK 후 호출 → **ACK은 Worker에서 수행**
 
 ```typescript
-// Step 6 적용 후 handleJobComplete() 최종 형태:
-private async handleJobComplete(result: JobProcessorResponse): Promise<void> {
-  try {
-    // 1. Step 6: In-flight Queue에서 제거 (ACK)
-    const isNormalAck = await this.reliableQueue.ack(result.jobId);
-    if (!isNormalAck) {
-      this.logger.warn(`Late ACK for ${result.jobId}, result may be duplicated`);
-    }
-
-    // 2. Step 5: 결과 집계
-    if (this.aggregator) {
-      await this.aggregator.recordJobResult(result);
-    }
-
-    // 3. Step 1: Fair Queue ACK
-    const isGroupCompleted = await this.fairQueue.ack(result.jobId, result.groupId);
-
-    // 4. Step 3: 그룹 완료 시 혼잡 통계 리셋
-    if (isGroupCompleted) {
-      await this.congestionControl.resetGroupStats(result.groupId);
-      if (this.aggregator) {
-        await this.aggregator.finalizeGroup(result.groupId);
-      }
-    }
-  } catch (error) {
-    this.logger.error(`Failed to handle job completion: ${error.message}`, error.stack);
-  }
-}
-```
-
-#### Step 5 Aggregator 연동
-
-Orphan Recovery에서 Dead Letter로 이동된 작업도 Step 5 집계에 반영해야 한다.
-
-```typescript
-// OrphanRecoveryService에 AggregatorService 주입:
 constructor(
-  @Inject(REDIS_CLIENT) private readonly redis: Redis,
-  @Inject(BULK_ACTION_CONFIG) private readonly config: BulkActionConfig,
-  @Optional() private readonly aggregator?: AggregatorService,
+  // ... 기존 주입
+  private readonly reliableQueue: ReliableQueueService,  // NEW
 ) {}
 
-private async recoveryCycle(): Promise<{ recovered: number; deadLettered: number }> {
-  // ... 기존 Lua 실행 ...
+private createWorkers(): void {
+  const { workerCount, jobTimeoutMs } = this.config.workerPool;
+  const { workerPollIntervalMs } = this.config.reliableQueue;
 
-  const recovered = result[0];
-  const deadLettered = result[1];
-  // recover_orphans.lua가 반환한 Dead Letter jobId 목록 (Issue #2에서 추가)
-  const deadLetteredJobIds: string[] = [];
-  for (let i = 2; i < result.length; i++) {
-    deadLetteredJobIds.push(result[i]);
+  for (let i = 0; i < workerCount; i++) {
+    const worker = new Worker(i, this.processorMap, {
+      jobTimeoutMs,
+      pollIntervalMs: workerPollIntervalMs,
+      onJobComplete: async (result) => this.handleJobComplete(result),
+      onJobFailed: async (job, error) => this.handleJobFailed(job, error),
+      loadJobData: async (jobId) =>
+        this.redisService.hash.getAll(this.keys.job(jobId)),
+      reliableDequeue: async (workerId) =>
+        this.reliableQueue.dequeue(workerId),
+      reliableAck: async (jobId) => this.reliableQueue.ack(jobId),
+      reliableNack: async (jobId) => this.reliableQueue.nack(jobId),
+      extendDeadline: async (jobId) =>
+        this.reliableQueue.extendDeadline(jobId),
+    });
+    this.workers.push(worker);
   }
-
-  // Step 5 Aggregator: Dead Letter 작업을 실패로 집계
-  if (this.aggregator && deadLetteredJobIds.length > 0) {
-    for (const jobId of deadLetteredJobIds) {
-      const groupId = await this.redis.hget(`job:${jobId}`, 'groupId') ?? '';
-      const jobType = await this.redis.hget(`job:${jobId}`, 'type') ?? '';
-      await this.aggregator.recordJobResult({
-        jobId,
-        groupId,
-        jobType,
-        success: false,
-        error: {
-          message: 'Orphan recovery: max retries exceeded',
-          code: 'ORPHAN_DEAD_LETTER',
-          retryable: false,
-        },
-        durationMs: 0,
-      });
-    }
-  }
-
-  // ... 로깅 및 반환 ...
 }
 ```
 
-#### firstJobStartedAt 갱신 (DISPATCHED → RUNNING 전이 트리거)
+> **주요 설계 결정**: Worker가 ACK/NACK을 직접 호출한 후 `onJobComplete`/`onJobFailed`를 호출한다.
+> `handleJobComplete()`에서는 ACK을 수행하지 않는다 — ACK은 Worker.tick()에서 이미 완료됨.
 
-Step 5의 Watcher는 `firstJobStartedAt > 0` 조건으로 DISPATCHED → RUNNING 전이를 판단한다.
-`blockingDequeue()` 성공 시 Worker가 이 필드를 갱신해야 한다.
+#### Step 5 Aggregator 연동: OrphanRecovery → handleDeadLetteredOrphans
+
+Orphan Recovery에서 Dead Letter로 이동된 작업도 Step 5 집계에 반영한다.
+`recover-orphans.lua`가 반환하는 `{jobId, groupId}` 쌍을 사용하여 Node.js에서 처리한다.
 
 ```typescript
-// Worker.tick() 내, blockingDequeue 성공 후:
-const result = await this.reliableQueue.blockingDequeue(workerId, timeoutSec);
-if (!result) return;
+// OrphanRecoveryService.handleDeadLetteredOrphans()
+private async handleDeadLetteredOrphans(pairs: string[]): Promise<void> {
+  for (let i = 0; i < pairs.length; i += 2) {
+    const jobId = pairs[i];
+    const groupId = pairs[i + 1];
 
-const job = await this.loadJob(result.jobId);
-if (!job) { /* ... */ return; }
+    // 1. 실패 집계
+    await this.aggregatorService.recordJobResult({
+      jobId, groupId, success: false, durationMs: 0,
+      processorType: '',
+      error: { message: 'orphan: max retries exceeded', retryable: false },
+    });
 
-// Step 5: DISPATCHED → RUNNING 전이를 위한 firstJobStartedAt 갱신
-// HSETNX를 사용하여 첫 번째 Job만 기록한다.
-await this.redis.hsetnx(
-  `group:${job.groupId}:meta`,
-  'firstJobStartedAt',
-  Date.now().toString(),
-);
+    // 2. Fair Queue ACK (그룹 완료 여부 확인)
+    // ⚠️ ack.lua가 job status를 COMPLETED로 덮어씌움
+    const isGroupCompleted = await this.fairQueue.ack(jobId, groupId);
+
+    // 3. 그룹 완료 시 집계 최종화
+    if (isGroupCompleted) {
+      await this.aggregatorService.finalizeGroup(groupId);
+    }
+  }
+}
 ```
 
 ### 완성된 시스템 요약
@@ -2295,7 +1832,25 @@ Step 6. Reliable Queue       "안전하게"    ─ At-least-once + 멱등성 보
   이슈: recover_orphans.lua retryCount 항상 0                                                                                     
   수정 내용: reliable_dequeue.lua에 retryCount/groupId 저장, blockingDequeue()/dequeue()에서 Job Hash 조회 후 전달                
   ────────────────────────────────────────                                                                                        
-  #: 8                                                                                                                            
-  이슈: Step 4/5 연동 인터페이스 부재                                                                                             
-  수정 내용: Step 4 교체 5개 지점 테이블, handleJobComplete() 최종 형태, OrphanRecovery→Aggregator 연동, firstJobStartedAt HSETNX 
+  #: 8
+  이슈: Step 4/5 연동 인터페이스 부재
+  수정 내용: Step 4 교체 5개 지점 테이블, handleJobComplete() 최종 형태, OrphanRecovery→Aggregator 연동, firstJobStartedAt HSETNX
+```
+
+#### 2. 2026-03-06 — 실제 구현 반영 갱신
+```
+  설계 문서의 구현 코드 섹션을 실제 코드와 일치시킴. 주요 변경:
+
+  1. Redis 접근: raw ioredis → RedisService 래퍼
+  2. 키 관리: 하드코딩 → RedisKeyBuilder
+  3. 파일명: kebab-case → PascalCase (프로젝트 컨벤션)
+  4. Lua 스크립트명: reliable_dequeue/ack_job → reliableDequeue/reliableAck/extendDeadline
+  5. blockingDequeue 제거 → non-blocking dequeue + poll+sleep 패턴
+  6. nack(): retry/DLQ 로직 제거 → In-flight 제거만 (reliable-ack.lua 재사용)
+     retry/DLQ 판정은 기존 WorkerPoolService.handleJobFailed()가 담당
+  7. Worker: 서비스 주입 → 콜백 기반 (plain class 유지)
+  8. OrphanRecovery: @Optional() aggregator → AggregatorService + FairQueueService 직접 주입
+     handleDeadLetteredOrphans()로 {jobId, groupId} 쌍 처리
+  9. Config: workerPollIntervalMs 추가
+  10. 테스트: createTestBulkActionConfig() 팩토리, RedisService/RedisKeyBuilder 사용
 ```
