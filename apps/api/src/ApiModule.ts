@@ -6,6 +6,7 @@ import { CryptoModule } from '@app/crypto/CryptoModule';
 import { NotificationManagerModule } from '@app/notification-manager/NotificationManagerModule';
 import { NotificationModule } from './notification/NotificationModule';
 import { BuyerModule } from './buyer/BuyerModule';
+import { BulkActionApiModule } from './bulk-action/BulkActionApiModule';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { BuyerModule } from './buyer/BuyerModule';
     NotificationModule,
     CryptoModule,
     NotificationManagerModule,
+    BulkActionApiModule,
   ],
 })
 export class ApiModule {}
