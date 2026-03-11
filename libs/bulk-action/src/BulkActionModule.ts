@@ -1,7 +1,7 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import { RedisModule } from '@app/redis/RedisModule';
 import { AggregatorService } from './aggregator/AggregatorService';
-import { AGGREGATOR } from './aggregator/AggregatorInterface';
+import { AGGREGATOR, Aggregator } from './aggregator/AggregatorInterface';
 import { DefaultAggregator } from './aggregator/DefaultAggregator';
 import { BackpressureService } from './backpressure/BackpressureService';
 import { DispatcherService } from './backpressure/DispatcherService';
@@ -38,6 +38,7 @@ import { EmailProcessor } from './processor/EmailProcessor';
 import { PushNotificationProcessor } from './processor/PushNotificationProcessor';
 import { FetcherService } from './worker-pool/FetcherService';
 import { JOB_PROCESSOR } from './model/job-processor/JobProcessor';
+import { JobProcessor } from './model/job-processor/JobProcessor';
 import { WorkerPoolService } from './worker-pool/WorkerPoolService';
 import { ReliableQueueService } from './reliable-queue/ReliableQueueService';
 import { InFlightQueueService } from './reliable-queue/InFlightQueueService';
@@ -48,6 +49,11 @@ import { WatcherService } from './watcher/WatcherService';
 
 @Module({})
 export class BulkActionModule {
+  private static readonly CUSTOM_JOB_PROCESSORS = Symbol(
+    'CUSTOM_JOB_PROCESSORS',
+  );
+  private static readonly CUSTOM_AGGREGATORS = Symbol('CUSTOM_AGGREGATORS');
+
   static register(
     config: { redis: BulkActionRedisConfig } & {
       fairQueue?: Partial<FairQueueConfig>;
@@ -132,16 +138,36 @@ export class BulkActionModule {
         DefaultAggregator,
         {
           provide: AGGREGATOR,
-          useFactory: (defaultAgg: DefaultAggregator) => [defaultAgg],
-          inject: [DefaultAggregator],
+          useFactory: (
+            defaultAgg: DefaultAggregator,
+            customAggs?: Aggregator[],
+          ) => [defaultAgg, ...(customAggs ?? [])],
+          inject: [
+            DefaultAggregator,
+            {
+              token: BulkActionModule.CUSTOM_AGGREGATORS,
+              optional: true,
+            },
+          ],
         },
         {
           provide: JOB_PROCESSOR,
           useFactory: (
             email: EmailProcessor,
             push: PushNotificationProcessor,
-          ) => [email, push],
-          inject: [EmailProcessor, PushNotificationProcessor],
+            customProcessors?: JobProcessor[],
+          ) =>
+            customProcessors && customProcessors.length > 0
+              ? customProcessors
+              : [email, push],
+          inject: [
+            EmailProcessor,
+            PushNotificationProcessor,
+            {
+              token: BulkActionModule.CUSTOM_JOB_PROCESSORS,
+              optional: true,
+            },
+          ],
         },
       ],
       exports: [
@@ -164,34 +190,40 @@ export class BulkActionModule {
   static registerProcessors(processors: any[]): DynamicModule {
     return {
       module: BulkActionModule,
+      global: true,
       providers: [
+        ...processors,
         {
-          provide: JOB_PROCESSOR,
+          provide: BulkActionModule.CUSTOM_JOB_PROCESSORS,
           useFactory: (...instances: any[]) => instances,
           inject: processors,
         },
-        ...processors,
+        {
+          provide: JOB_PROCESSOR,
+          useExisting: BulkActionModule.CUSTOM_JOB_PROCESSORS,
+        },
       ],
-      exports: [JOB_PROCESSOR],
+      exports: [BulkActionModule.CUSTOM_JOB_PROCESSORS, JOB_PROCESSOR],
     };
   }
 
   static registerAggregators(aggregators: any[]): DynamicModule {
     return {
       module: BulkActionModule,
+      global: true,
       providers: [
+        ...aggregators,
+        {
+          provide: BulkActionModule.CUSTOM_AGGREGATORS,
+          useFactory: (...instances: any[]) => instances,
+          inject: aggregators,
+        },
         {
           provide: AGGREGATOR,
-          useFactory: (defaultAgg: DefaultAggregator, ...custom: any[]) => [
-            defaultAgg,
-            ...custom,
-          ],
-          inject: [DefaultAggregator, ...aggregators],
+          useExisting: BulkActionModule.CUSTOM_AGGREGATORS,
         },
-        DefaultAggregator,
-        ...aggregators,
       ],
-      exports: [AGGREGATOR],
+      exports: [BulkActionModule.CUSTOM_AGGREGATORS, AGGREGATOR],
     };
   }
 }
