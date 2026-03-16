@@ -48,6 +48,7 @@
     "ioredis": "^5.9.2",
     "js-yaml": "^4.1.0",
     "mustache": "^4.2.0",
+    "mysql2": "^3.20.0",
     "node-fetch": "2",
     "node-json-db": "^2.3.0",
     "openai": "^4.12.1",

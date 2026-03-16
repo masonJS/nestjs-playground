@@ -1,0 +1,11 @@
+services:
+  mysql-db:
+    image: mysql:latest
+    container_name: play_ground_mysql_db
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_USER: test
+      MYSQL_PASSWORD: test
+      MYSQL_DATABASE: test
+    ports:
+      - "3307:3306"
