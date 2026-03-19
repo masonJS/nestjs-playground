@@ -1,0 +1,5 @@
+export enum TransactionPhase {
+  BEFORE_COMMIT = 'BEFORE_COMMIT',
+  AFTER_COMMIT = 'AFTER_COMMIT',
+  AFTER_ROLLBACK = 'AFTER_ROLLBACK',
+}
