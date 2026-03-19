@@ -3,9 +3,12 @@ import { BodyInserter } from '@app/web-client/http/BodyInserter';
 import got, { ExtendOptions, Method } from 'got';
 import { MediaType } from '@app/web-client/http/MediaType';
 import { ResponseSpec } from '@app/web-client/http/ResponseSpec';
+import { RetryPolicy } from '@app/web-client/retry/RetryPolicy';
+import { RetryExecutor } from '@app/web-client/retry/RetryExecutor';
 
 export class GotClient implements WebClient {
   readonly #options: ExtendOptions;
+  #retryPolicy: RetryPolicy | null = null;
 
   constructor(url?: string, requestTimeout = 5000) {
     this.#options = {
@@ -83,7 +86,24 @@ export class GotClient implements WebClient {
     return this;
   }
 
+  retry(policy: RetryPolicy): this {
+    this.#retryPolicy = policy;
+
+    return this;
+  }
+
   async retrieve(): Promise<ResponseSpec> {
+    if (this.#retryPolicy) {
+      return RetryExecutor.execute(
+        async () => this.doRequest(),
+        this.#retryPolicy,
+      );
+    }
+
+    return this.doRequest();
+  }
+
+  private async doRequest(): Promise<ResponseSpec> {
     try {
       const response = await got({
         ...this.#options,
