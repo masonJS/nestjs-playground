@@ -2,12 +2,15 @@ import { WebClient } from '@app/web-client/WebClient';
 import { MediaType } from '@app/web-client/http/MediaType';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
 import { ResponseSpec } from '@app/web-client/http/ResponseSpec';
+import { RetryPolicy } from '@app/web-client/retry/RetryPolicy';
+import { RetryExecutor } from '@app/web-client/retry/RetryExecutor';
 import { Method } from 'got';
 
 export class FetchClient implements WebClient {
   #url: string;
   #options: RequestInit;
   #timeout: number;
+  #retryPolicy: RetryPolicy | null = null;
 
   constructor(url?: string, requestTimeout = 5000) {
     if (url) {
@@ -93,7 +96,24 @@ export class FetchClient implements WebClient {
     return this;
   }
 
+  retry(policy: RetryPolicy): this {
+    this.#retryPolicy = policy;
+
+    return this;
+  }
+
   async retrieve(): Promise<ResponseSpec> {
+    if (this.#retryPolicy) {
+      return RetryExecutor.execute(
+        async () => this.doFetch(),
+        this.#retryPolicy,
+      );
+    }
+
+    return this.doFetch();
+  }
+
+  private async doFetch(): Promise<ResponseSpec> {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.#timeout);
