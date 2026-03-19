@@ -1,6 +1,7 @@
 import { MediaType } from '@app/web-client/http/MediaType';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
 import { ResponseSpec } from '@app/web-client/http/ResponseSpec';
+import { RetryPolicy } from '@app/web-client/retry/RetryPolicy';
 
 export interface WebClient {
   get(): this;
@@ -22,6 +23,8 @@ export interface WebClient {
   body<T>(body: BodyInserter<T>): this;
 
   timeout(timeout: number): this;
+
+  retry(policy: RetryPolicy): this;
 
   retrieve(): Promise<ResponseSpec>;
 }

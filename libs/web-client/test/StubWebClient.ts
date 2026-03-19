@@ -3,6 +3,7 @@ import { MediaType } from '@app/web-client/http/MediaType';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
 import { Method } from 'got';
 import { ResponseSpec } from '@app/web-client/http/ResponseSpec';
+import { RetryPolicy } from '@app/web-client/retry/RetryPolicy';
 
 export class StubWebClient implements WebClient {
   private static instance: StubWebClient;
@@ -13,6 +14,7 @@ export class StubWebClient implements WebClient {
   requestBodies: string[] = [];
   requestCount = 0;
   requestTimeout = 5000;
+  retryPolicy: RetryPolicy | null = null;
 
   responses: {
     statusCode: number;
@@ -99,6 +101,12 @@ export class StubWebClient implements WebClient {
     return this;
   }
 
+  retry(policy: RetryPolicy): this {
+    this.retryPolicy = policy;
+
+    return this;
+  }
+
   async retrieve(): Promise<ResponseSpec> {
     this.requestCount += 1;
 
@@ -144,6 +152,7 @@ export class StubWebClient implements WebClient {
     this.requestBodies = [];
     this.responses = [];
     this.requestCount = 0;
+    this.retryPolicy = null;
 
     return this;
   }
