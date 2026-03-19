@@ -26,6 +26,10 @@ export class InMemoryDBModule {
       name: 'current_database',
       implementation: () => 'test',
     });
+    this.db.public.registerFunction({
+      name: 'version',
+      implementation: () => 'PostgreSQL 14.0 (pg-mem)',
+    });
 
     this.datasource = this.db.adapters.createTypeormDataSource({
       type: 'postgres',
@@ -34,7 +38,7 @@ export class InMemoryDBModule {
       namingStrategy: new SnakeNamingStrategy(),
     });
 
-    await this.datasource.synchronize();
+    await this.datasource.initialize();
 
     this.backup = this.db.backup();
 
