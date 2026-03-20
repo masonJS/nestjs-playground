@@ -8,13 +8,12 @@ module.exports = {
   extends: [
     'plugin:@typescript-eslint/recommended',
     'plugin:prettier/recommended',
-    'plugin:jest-formatting/recommended',
+    'plugin:vitest/recommended',
     'eslint-config-async',
   ],
   root: true,
   env: {
     node: true,
-    vitest: true,
   },
   ignorePatterns: ['.eslintrc.js'],
   rules: {
