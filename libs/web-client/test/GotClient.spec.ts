@@ -1,4 +1,4 @@
-import * as nock from 'nock';
+import nock from 'nock';
 import { GotClient } from '@app/web-client/GotClient';
 import { BodyInserter } from '@app/web-client/http/BodyInserter';
 import { MediaType } from '@app/web-client/http/MediaType';
@@ -110,7 +110,7 @@ describe('GotClient', () => {
 
     // then
     await expect(response).rejects.toThrowErrorMatchingInlineSnapshot(
-      `"Bad Request"`,
+      `[Error: Bad Request]`,
     );
   });
 
@@ -128,7 +128,7 @@ describe('GotClient', () => {
 
     // then
     await expect(response).rejects.toThrowErrorMatchingInlineSnapshot(
-      `"Internal Server Error"`,
+      `[Error: Internal Server Error]`,
     );
   });
 

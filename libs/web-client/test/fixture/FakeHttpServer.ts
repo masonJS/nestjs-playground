@@ -1,4 +1,4 @@
-import * as express from 'express';
+import express from 'express';
 import { Express } from 'express';
 
 const FakeHttpServer: Express = express();

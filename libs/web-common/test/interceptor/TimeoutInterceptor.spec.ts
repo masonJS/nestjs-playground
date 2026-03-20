@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import { delay, of } from 'rxjs';
 import { RequestTimeoutException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { mock, mockReset } from 'jest-mock-extended';
+import { mock, mockReset } from 'vitest-mock-extended';
 import { TimeoutInterceptor } from '../../src/interceptor/TimeoutInterceptor';
 
 describe('TimeoutInterceptor', () => {
@@ -28,7 +28,7 @@ describe('TimeoutInterceptor', () => {
   });
 
   it('처리 시간의 이하 시간이 소요될시 정상 처리 되어진다.', (done: any) => {
-    reflector.getAllAndOverride.mockReturnValue(500);
+    vi.mocked(reflector.getAllAndOverride).mockReturnValue(500);
 
     callHandler.handle.mockReturnValue(of([]).pipe(delay(500)));
 
@@ -43,7 +43,7 @@ describe('TimeoutInterceptor', () => {
   });
 
   it(`처리 시간의 초과 시간이 소요될시 timeout exception이 발생한다.`, (done: any) => {
-    reflector.getAllAndOverride.mockReturnValue(500);
+    vi.mocked(reflector.getAllAndOverride).mockReturnValue(500);
 
     callHandler.handle.mockReturnValue(of([]).pipe(delay(501)));
 
@@ -61,6 +61,6 @@ describe('TimeoutInterceptor', () => {
   } as any;
 
   const callHandler = {
-    handle: jest.fn(),
+    handle: vi.fn(),
   };
 });

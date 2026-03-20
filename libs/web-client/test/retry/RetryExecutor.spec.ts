@@ -5,7 +5,7 @@ describe('RetryExecutor', () => {
   it('첫 시도에 성공하면 바로 결과를 반환한다', async () => {
     // given
     const policy = RetryPolicy.withDefaults();
-    const action = jest.fn().mockResolvedValue('success');
+    const action = vi.fn().mockResolvedValue('success');
 
     // when
     const result = await RetryExecutor.execute(action, policy);
@@ -18,7 +18,7 @@ describe('RetryExecutor', () => {
   it('n번 실패 후 성공하면 결과를 반환한다', async () => {
     // given
     const policy = RetryPolicy.builder().maxRetries(3).delay(1).build();
-    const action = jest
+    const action = vi
       .fn()
       .mockRejectedValueOnce(new Error('fail 1'))
       .mockRejectedValueOnce(new Error('fail 2'))
@@ -35,7 +35,7 @@ describe('RetryExecutor', () => {
   it('모든 재시도가 소진되면 마지막 에러를 throw한다', async () => {
     // given
     const policy = RetryPolicy.builder().maxRetries(2).delay(1).build();
-    const action = jest.fn().mockRejectedValue(new Error('always fail'));
+    const action = vi.fn().mockRejectedValue(new Error('always fail'));
 
     // when & then
     await expect(RetryExecutor.execute(action, policy)).rejects.toThrow(

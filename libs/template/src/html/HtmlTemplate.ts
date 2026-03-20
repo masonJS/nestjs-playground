@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Injectable } from '@nestjs/common';
-import * as mustache from 'mustache';
+import mustache from 'mustache';
 import { HtmlTemplateFile } from './enum/HtmlTemplateFile';
 
 @Injectable()

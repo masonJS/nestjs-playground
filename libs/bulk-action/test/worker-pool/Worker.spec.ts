@@ -1,4 +1,5 @@
 import { setTimeout } from 'timers/promises';
+import { Mock, Mocked } from 'vitest';
 import { Worker } from '@app/bulk-action/worker-pool/Worker';
 import { WorkerState } from '@app/bulk-action/model/WorkerState';
 import { JobProcessor } from '@app/bulk-action/model/job-processor/JobProcessor';
@@ -11,24 +12,24 @@ async function sleep(ms: number): Promise<void> {
 
 describe('Worker', () => {
   let worker: Worker;
-  let mockProcessor: jest.Mocked<JobProcessor>;
-  let onJobComplete: jest.Mock;
-  let onJobFailed: jest.Mock;
-  let loadJobData: jest.Mock;
-  let mockReliableDequeue: jest.Mock;
-  let mockReliableAck: jest.Mock;
-  let mockReliableNack: jest.Mock;
-  let mockExtendDeadline: jest.Mock;
+  let mockProcessor: Mocked<JobProcessor>;
+  let onJobComplete: Mock;
+  let onJobFailed: Mock;
+  let loadJobData: Mock;
+  let mockReliableDequeue: Mock;
+  let mockReliableAck: Mock;
+  let mockReliableNack: Mock;
+  let mockExtendDeadline: Mock;
 
   beforeEach(() => {
     mockProcessor = {
       type: 'TEST',
-      process: jest.fn(),
+      process: vi.fn(),
     };
 
-    onJobComplete = jest.fn().mockResolvedValue(undefined);
-    onJobFailed = jest.fn().mockResolvedValue(undefined);
-    loadJobData = jest.fn().mockResolvedValue({
+    onJobComplete = vi.fn().mockResolvedValue(undefined);
+    onJobFailed = vi.fn().mockResolvedValue(undefined);
+    loadJobData = vi.fn().mockResolvedValue({
       id: 'job-001',
       groupId: 'customer-A',
       processorType: 'TEST',
@@ -38,10 +39,10 @@ describe('Worker', () => {
       createdAt: '0',
     });
 
-    mockReliableDequeue = jest.fn().mockResolvedValue(null);
-    mockReliableAck = jest.fn().mockResolvedValue(true);
-    mockReliableNack = jest.fn().mockResolvedValue(undefined);
-    mockExtendDeadline = jest.fn().mockResolvedValue(true);
+    mockReliableDequeue = vi.fn().mockResolvedValue(null);
+    mockReliableAck = vi.fn().mockResolvedValue(true);
+    mockReliableNack = vi.fn().mockResolvedValue(undefined);
+    mockExtendDeadline = vi.fn().mockResolvedValue(true);
 
     const processorMap = new Map([['TEST', mockProcessor]]);
 
