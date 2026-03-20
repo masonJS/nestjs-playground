@@ -14,8 +14,8 @@ describe('FetchClient', () => {
     url = `http://localhost:${port}`;
   });
 
-  afterAll((done) => {
-    server.close(() => done());
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
   describe('url', () => {
