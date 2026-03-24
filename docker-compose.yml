@@ -17,11 +17,11 @@ services:
       - "6379:6379"
 
   localstack:
-    image: localstack/localstack:0.14.1
+    image: localstack/localstack:4
     container_name: play_ground_localstack
     ports:
       - "4568:4566"
     volumes:
-      - "./scripts/localstack:/docker-entrypoint-initaws.d"
+      - "./scripts/localstack:/etc/localstack/init/ready.d"
     environment:
-      - SERVICES=sns,s3
+      - ACTIVATE_PRO=0
