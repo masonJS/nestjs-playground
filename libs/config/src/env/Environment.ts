@@ -1,6 +1,7 @@
 import { IsNotEmpty, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { SnsEnvironment } from '@app/config/env/SnsEnvironment';
+import { SesEnvironment } from '@app/config/env/SesEnvironment';
 import { S3Environment } from '@app/config/env/S3Environment';
 import { ChatGPTEnvironment } from '@app/config/env/ChatGPTEnvironment';
 import { CryptoEnvironment } from '@app/config/env/CryptoEnvironment';
@@ -18,6 +19,11 @@ export class Environment {
   @IsNotEmpty()
   @Type(() => SnsEnvironment)
   sns: SnsEnvironment;
+
+  @ValidateNested()
+  @IsNotEmpty()
+  @Type(() => SesEnvironment)
+  ses: SesEnvironment;
 
   @ValidateNested()
   @IsNotEmpty()
