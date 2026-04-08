@@ -8,7 +8,7 @@ import { HtmlTemplateFile } from './enum/HtmlTemplateFile';
 export class HtmlTemplate {
   render(template: HtmlTemplateFile, data: Record<string, unknown>): string {
     const html = fs.readFileSync(
-      path.join(__dirname, `/../../public/${template}.hbs`),
+      path.join(process.cwd(), `libs/template/public/${template}.hbs`),
     );
 
     return mustache.render(html.toString(), data);
