@@ -25,3 +25,14 @@ services:
       - "./scripts/localstack:/etc/localstack/init/ready.d"
     environment:
       - ACTIVATE_PRO=0
+
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    container_name: jaeger
+    ports:
+      - '16686:16686'
+      - '4318:4318'
+    volumes:
+      - ./jaeger-ui.json:/etc/jaeger/jaeger-ui.json
+    environment:
+      - JAEGER_UI_CONFIG=/etc/jaeger/jaeger-ui.json
