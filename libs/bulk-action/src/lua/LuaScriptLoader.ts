@@ -1,4 +1,4 @@
-import * as fs from 'fs/promises';
+import * as fs from 'fs';
 import * as path from 'path';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { RedisService } from '@app/redis/RedisService';
@@ -7,32 +7,36 @@ import { RedisService } from '@app/redis/RedisService';
 export class LuaScriptLoader implements OnModuleInit {
   constructor(private readonly redisService: RedisService) {}
 
-  async onModuleInit(): Promise<void> {
-    await this.loadScript('enqueue', 'enqueue.lua', 4);
-    await this.loadScript('dequeue', 'dequeue.lua', 3);
-    await this.loadScript('ack', 'ack.lua', 2);
-    await this.loadScript('rateLimitCheck', 'rate-limit-check.lua', 3);
-    await this.loadScript('readyQueuePush', 'ready-queue-push.lua', 1);
-    await this.loadScript('moveToReady', 'move-to-ready.lua', 2);
-    await this.loadScript('congestionBackoff', 'congestion-backoff.lua', 4);
-    await this.loadScript('congestionRelease', 'congestion-release.lua', 2);
-    await this.loadScript('recordJobResult', 'record-job-result.lua', 2);
-    await this.loadScript('transitionStatus', 'transition-status.lua', 1);
-    await this.loadScript('acquireLock', 'acquire-lock.lua', 1);
-    await this.loadScript('releaseLock', 'release-lock.lua', 1);
-    await this.loadScript('reliableDequeue', 'reliable-dequeue.lua', 3);
-    await this.loadScript('reliableAck', 'reliable-ack.lua', 2);
-    await this.loadScript('recoverOrphans', 'recover-orphans.lua', 4);
-    await this.loadScript('extendDeadline', 'extend-deadline.lua', 2);
+  onModuleInit(): void {
+    this.loadScript('enqueue', 'enqueue.lua', 4);
+    this.loadScript('dequeue', 'dequeue.lua', 3);
+    this.loadScript('ack', 'ack.lua', 2);
+    this.loadScript('rateLimitCheck', 'rate-limit-check.lua', 3);
+    this.loadScript('readyQueuePush', 'ready-queue-push.lua', 1);
+    this.loadScript('moveToReady', 'move-to-ready.lua', 2);
+    this.loadScript('congestionBackoff', 'congestion-backoff.lua', 4);
+    this.loadScript('congestionRelease', 'congestion-release.lua', 2);
+    this.loadScript('recordJobResult', 'record-job-result.lua', 2);
+    this.loadScript('transitionStatus', 'transition-status.lua', 1);
+    this.loadScript('acquireLock', 'acquire-lock.lua', 1);
+    this.loadScript('releaseLock', 'release-lock.lua', 1);
+    this.loadScript('reliableDequeue', 'reliable-dequeue.lua', 3);
+    this.loadScript('reliableAck', 'reliable-ack.lua', 2);
+    this.loadScript('recoverOrphans', 'recover-orphans.lua', 4);
+    this.loadScript('extendDeadline', 'extend-deadline.lua', 2);
   }
 
-  private async loadScript(
+  private loadScript(
     name: string,
     filename: string,
     numberOfKeys: number,
-  ): Promise<void> {
-    const luaPath = path.join(__dirname, filename);
-    const lua = await fs.readFile(luaPath, 'utf-8');
+  ): void {
+    const luaPath = path.join(
+      process.cwd(),
+      'libs/bulk-action/src/lua',
+      filename,
+    );
+    const lua = fs.readFileSync(luaPath, 'utf-8');
 
     this.redisService.defineCommand({ name, numberOfKeys, lua });
   }
