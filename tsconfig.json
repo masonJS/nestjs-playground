@@ -126,6 +126,12 @@
       ],
       "@app/redis/*": [
         "libs/redis/src/*"
+      ],
+      "@app/telemetry": [
+        "libs/telemetry/src"
+      ],
+      "@app/telemetry/*": [
+        "libs/telemetry/src/*"
       ]
     }
   }
