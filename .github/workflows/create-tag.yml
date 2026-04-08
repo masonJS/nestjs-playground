@@ -3,7 +3,7 @@ on:
   pull_request:
     branches:
       - main
-    types: [ closed ]
+    types: [closed]
 jobs:
   build:
     runs-on: ubuntu-latest

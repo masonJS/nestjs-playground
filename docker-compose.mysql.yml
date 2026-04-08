@@ -8,4 +8,4 @@ services:
       MYSQL_PASSWORD: test
       MYSQL_DATABASE: test
     ports:
-      - "3307:3306"
+      - '3307:3306'

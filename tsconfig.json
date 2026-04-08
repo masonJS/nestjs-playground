@@ -25,114 +25,42 @@
     "noImplicitOverride": true,
     "strictPropertyInitialization": false,
     "paths": {
-      "@app/entity": [
-        "libs/entity/src"
-      ],
-      "@app/entity/*": [
-        "libs/entity/src/*"
-      ],
-      "@app/config": [
-        "libs/config/src"
-      ],
-      "@app/config/*": [
-        "libs/config/src/*"
-      ],
-      "@app/logger": [
-        "libs/logger/src"
-      ],
-      "@app/logger/*": [
-        "libs/logger/src/*"
-      ],
-      "@app/web-client": [
-        "libs/web-client/src"
-      ],
-      "@app/web-client/*": [
-        "libs/web-client/src/*"
-      ],
-      "@app/file-manager": [
-        "libs/file-manager/src"
-      ],
-      "@app/file-manager/*": [
-        "libs/file-manager/src/*"
-      ],
-      "@app/event-publisher": [
-        "libs/event-publisher/src"
-      ],
-      "@app/event-publisher/*": [
-        "libs/event-publisher/src/*"
-      ],
-      "@app/file-storage": [
-        "libs/file-storage/src"
-      ],
-      "@app/file-storage/*": [
-        "libs/file-storage/src/*"
-      ],
-      "@app/event-listener": [
-        "libs/event-listener/src"
-      ],
-      "@app/event-listener/*": [
-        "libs/event-listener/src/*"
-      ],
-      "@app/event-emitter": [
-        "libs/event-emitter/src"
-      ],
-      "@app/event-emitter/*": [
-        "libs/event-emitter/src/*"
-      ],
-      "@app/mailer": [
-        "libs/mailer/src"
-      ],
-      "@app/mailer/*": [
-        "libs/mailer/src/*"
-      ],
-      "@app/template": [
-        "libs/template/src"
-      ],
-      "@app/template/*": [
-        "libs/template/src/*"
-      ],
-      "@app/chat-gpt": [
-        "libs/chat-gpt/src"
-      ],
-      "@app/chat-gpt/*": [
-        "libs/chat-gpt/src/*"
-      ],
-      "@app/crypto": [
-        "libs/crypto/src"
-      ],
-      "@app/crypto/*": [
-        "libs/crypto/src/*"
-      ],
-      "@app/notification-manager": [
-        "libs/notification-manager/src"
-      ],
-      "@app/notification-manager/*": [
-        "libs/notification-manager/src/*"
-      ],
-      "@app/json-db": [
-        "libs/json-db/src"
-      ],
-      "@app/json-db/*": [
-        "libs/json-db/src/*"
-      ],
-      "@app/bulk-action": [
-        "libs/bulk-action/src"
-      ],
-      "@app/bulk-action/*": [
-        "libs/bulk-action/src/*"
-      ],
-      "@app/redis": [
-        "libs/redis/src"
-      ],
-      "@app/redis/*": [
-        "libs/redis/src/*"
-      ],
-      "@app/telemetry": [
-        "libs/telemetry/src"
-      ],
-      "@app/telemetry/*": [
-        "libs/telemetry/src/*"
-      ]
+      "@app/entity": ["libs/entity/src"],
+      "@app/entity/*": ["libs/entity/src/*"],
+      "@app/config": ["libs/config/src"],
+      "@app/config/*": ["libs/config/src/*"],
+      "@app/logger": ["libs/logger/src"],
+      "@app/logger/*": ["libs/logger/src/*"],
+      "@app/web-client": ["libs/web-client/src"],
+      "@app/web-client/*": ["libs/web-client/src/*"],
+      "@app/file-manager": ["libs/file-manager/src"],
+      "@app/file-manager/*": ["libs/file-manager/src/*"],
+      "@app/event-publisher": ["libs/event-publisher/src"],
+      "@app/event-publisher/*": ["libs/event-publisher/src/*"],
+      "@app/file-storage": ["libs/file-storage/src"],
+      "@app/file-storage/*": ["libs/file-storage/src/*"],
+      "@app/event-listener": ["libs/event-listener/src"],
+      "@app/event-listener/*": ["libs/event-listener/src/*"],
+      "@app/event-emitter": ["libs/event-emitter/src"],
+      "@app/event-emitter/*": ["libs/event-emitter/src/*"],
+      "@app/mailer": ["libs/mailer/src"],
+      "@app/mailer/*": ["libs/mailer/src/*"],
+      "@app/template": ["libs/template/src"],
+      "@app/template/*": ["libs/template/src/*"],
+      "@app/chat-gpt": ["libs/chat-gpt/src"],
+      "@app/chat-gpt/*": ["libs/chat-gpt/src/*"],
+      "@app/crypto": ["libs/crypto/src"],
+      "@app/crypto/*": ["libs/crypto/src/*"],
+      "@app/notification-manager": ["libs/notification-manager/src"],
+      "@app/notification-manager/*": ["libs/notification-manager/src/*"],
+      "@app/json-db": ["libs/json-db/src"],
+      "@app/json-db/*": ["libs/json-db/src/*"],
+      "@app/bulk-action": ["libs/bulk-action/src"],
+      "@app/bulk-action/*": ["libs/bulk-action/src/*"],
+      "@app/redis": ["libs/redis/src"],
+      "@app/redis/*": ["libs/redis/src/*"],
+      "@app/telemetry": ["libs/telemetry/src"],
+      "@app/telemetry/*": ["libs/telemetry/src/*"]
     }
   }
 }
