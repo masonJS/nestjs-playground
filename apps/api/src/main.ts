@@ -1,3 +1,6 @@
+import { initTelemetry } from '@app/telemetry/initTelemetry';
+initTelemetry();
+
 import { NestFactory } from '@nestjs/core';
 import { ApiModule } from './ApiModule';
 import { setNestApp } from './setNestApp';
