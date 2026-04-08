@@ -312,22 +312,22 @@ acquire lock: lock:group:{groupId}:aggregation
 
 ## Redis Key 맵
 
-| Key | Type | 설명 |
-|-----|------|------|
-| `job:{jobId}` | Hash | Job 데이터 (id, groupId, processorType, payload, status, retryCount, createdAt) |
-| `group:{groupId}:jobs` | List | 그룹 FIFO 작업 목록 |
-| `group:{groupId}:meta` | Hash | 그룹 메타 (totalJobs, doneJobs, registeredJobs, status, successCount, failedCount, firstJobStartedAt, aggregationStartAt, timeoutAt, ...) |
-| `group:{groupId}:job-results` | List | Job 결과 JSON 목록 (집계용) |
-| `group:{groupId}:result` | Hash | 최종 집계 결과 (result, aggregatedAt) |
-| `fair-queue:{high\|normal\|low}` | SortedSet | 우선순위별 그룹 큐 |
-| `ready-queue` | List | 실행 대기 큐 (BLPOP 소비) |
-| `non-ready-queue` | SortedSet | 배압/혼잡 대기 큐 (score=실행시각) |
-| `rate-limit:{groupId}:{window}` | String | 그룹별 Rate Limit 카운터 |
-| `rate-limit:global:{window}` | String | 전역 Rate Limit 카운터 |
-| `active-groups` | Set | 활성 그룹 집합 |
-| `congestion:{groupId}:non-ready-count` | String | 그룹별 Non-ready 작업 수 |
-| `congestion:{groupId}:stats` | Hash | 혼잡 통계 |
-| `dead-letter-queue` | List | 최종 실패 작업 |
-| `lock:group:{groupId}:transition` | String | 그룹 전이 분산 락 |
-| `lock:group:{groupId}:aggregation` | String | 그룹 집계 분산 락 |
-| `watcher:active-groups` | Set | Watcher 감시 대상 그룹 |
+| Key                                    | Type      | 설명                                                                                                                                      |
+| -------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `job:{jobId}`                          | Hash      | Job 데이터 (id, groupId, processorType, payload, status, retryCount, createdAt)                                                           |
+| `group:{groupId}:jobs`                 | List      | 그룹 FIFO 작업 목록                                                                                                                       |
+| `group:{groupId}:meta`                 | Hash      | 그룹 메타 (totalJobs, doneJobs, registeredJobs, status, successCount, failedCount, firstJobStartedAt, aggregationStartAt, timeoutAt, ...) |
+| `group:{groupId}:job-results`          | List      | Job 결과 JSON 목록 (집계용)                                                                                                               |
+| `group:{groupId}:result`               | Hash      | 최종 집계 결과 (result, aggregatedAt)                                                                                                     |
+| `fair-queue:{high\|normal\|low}`       | SortedSet | 우선순위별 그룹 큐                                                                                                                        |
+| `ready-queue`                          | List      | 실행 대기 큐 (BLPOP 소비)                                                                                                                 |
+| `non-ready-queue`                      | SortedSet | 배압/혼잡 대기 큐 (score=실행시각)                                                                                                        |
+| `rate-limit:{groupId}:{window}`        | String    | 그룹별 Rate Limit 카운터                                                                                                                  |
+| `rate-limit:global:{window}`           | String    | 전역 Rate Limit 카운터                                                                                                                    |
+| `active-groups`                        | Set       | 활성 그룹 집합                                                                                                                            |
+| `congestion:{groupId}:non-ready-count` | String    | 그룹별 Non-ready 작업 수                                                                                                                  |
+| `congestion:{groupId}:stats`           | Hash      | 혼잡 통계                                                                                                                                 |
+| `dead-letter-queue`                    | List      | 최종 실패 작업                                                                                                                            |
+| `lock:group:{groupId}:transition`      | String    | 그룹 전이 분산 락                                                                                                                         |
+| `lock:group:{groupId}:aggregation`     | String    | 그룹 집계 분산 락                                                                                                                         |
+| `watcher:active-groups`                | Set       | Watcher 감시 대상 그룹                                                                                                                    |

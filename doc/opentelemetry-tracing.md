@@ -24,13 +24,13 @@ HTTP Request
 
 ## 기술 스택
 
-| 구성 요소 | 선택 | 이유 |
-|-----------|------|------|
-| SDK | `@opentelemetry/sdk-node` | Node.js 공식 SDK, 올인원 초기화 |
+| 구성 요소            | 선택                                        | 이유                                |
+| -------------------- | ------------------------------------------- | ----------------------------------- |
+| SDK                  | `@opentelemetry/sdk-node`                   | Node.js 공식 SDK, 올인원 초기화     |
 | Auto-instrumentation | `@opentelemetry/auto-instrumentations-node` | HTTP, PostgreSQL, Express 자동 계측 |
-| Exporter | `@opentelemetry/exporter-trace-otlp-http` | Jaeger OTLP 네이티브 지원 |
-| Propagator | W3C TraceContext (SDK 기본값) | 분산 트레이싱 표준 |
-| 시각화 | Jaeger all-in-one | Docker 한 줄 실행, OTLP 수신 지원 |
+| Exporter             | `@opentelemetry/exporter-trace-otlp-http`   | Jaeger OTLP 네이티브 지원           |
+| Propagator           | W3C TraceContext (SDK 기본값)               | 분산 트레이싱 표준                  |
+| 시각화               | Jaeger all-in-one                           | Docker 한 줄 실행, OTLP 수신 지원   |
 
 ## 구현 단계
 
@@ -52,16 +52,16 @@ yarn add @opentelemetry/sdk-node \
 `docker-compose.yml`에 Jaeger 서비스 추가:
 
 ```yaml
-  jaeger:
-    image: jaegertracing/jaeger:latest
-    container_name: jaeger
-    ports:
-      - '16686:16686'   # Jaeger UI
-      - '4318:4318'     # OTLP HTTP receiver
-    volumes:
-      - ./jaeger-ui.json:/etc/jaeger/jaeger-ui.json
-    environment:
-      - JAEGER_UI_CONFIG=/etc/jaeger/jaeger-ui.json
+jaeger:
+  image: jaegertracing/jaeger:latest
+  container_name: jaeger
+  ports:
+    - '16686:16686' # Jaeger UI
+    - '4318:4318' # OTLP HTTP receiver
+  volumes:
+    - ./jaeger-ui.json:/etc/jaeger/jaeger-ui.json
+  environment:
+    - JAEGER_UI_CONFIG=/etc/jaeger/jaeger-ui.json
 ```
 
 #### 1-3. 환경 변수 추가
@@ -132,6 +132,7 @@ export const Traceable = (): ClassDecorator =>
 > `@Injectable()`을 포함하지 않는 이유: 메타데이터 마킹과 DI 등록은 별개 관심사이므로 분리한다.
 
 사용 예시:
+
 ```typescript
 @Traceable()
 @Injectable()  // 기존 @Injectable() 유지

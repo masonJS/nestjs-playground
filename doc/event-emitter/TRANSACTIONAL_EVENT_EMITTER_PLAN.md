@@ -6,6 +6,7 @@
 이로 인해 트랜잭션이 롤백되더라도 이벤트 핸들러는 이미 실행된 상태가 되어, **데이터 정합성이 깨질 수 있다.**
 
 예시 시나리오:
+
 ```
 1. 주문 생성 트랜잭션 시작
 2. raise(OrderCreatedEvent)  →  알림 전송 핸들러 즉시 실행
@@ -63,6 +64,7 @@ QueryRunner의 lifecycle 콜백에 의존하는 대신,
 **TransactionService 레벨에서 이벤트를 버퍼링**하고 트랜잭션 결과에 따라 emit한다.
 
 이 방식의 장점:
+
 - 기존 `DataSource.transaction(fn)` 패턴을 그대로 유지
 - QueryRunner를 직접 다루지 않아 API가 단순
 - 트랜잭션 경계가 명확 (함수 성공 = commit, 실패 = rollback)
@@ -87,8 +89,8 @@ export class TransactionEventContext {
   private readonly buffer = new Map<TransactionPhase, SystemEvent[]>();
 
   constructor(private readonly eventEmitterService: EventEmitterService) {
-    Object.values(TransactionPhase).forEach(
-      (phase) => this.buffer.set(phase, []),
+    Object.values(TransactionPhase).forEach((phase) =>
+      this.buffer.set(phase, []),
     );
   }
 
@@ -96,7 +98,10 @@ export class TransactionEventContext {
    * 이벤트를 지정된 Phase에 예약한다. 즉시 emit하지 않는다.
    * phase 기본값: AFTER_COMMIT (가장 일반적인 사용 패턴)
    */
-  raise(event: SystemEvent, phase: TransactionPhase = TransactionPhase.AFTER_COMMIT): void {
+  raise(
+    event: SystemEvent,
+    phase: TransactionPhase = TransactionPhase.AFTER_COMMIT,
+  ): void {
     this.buffer.get(phase).push(event);
   }
 
@@ -139,7 +144,9 @@ export class TransactionService {
   }
 
   // 신규 API — 트랜잭션 Phase에 따라 이벤트 발행
-  async transactionalWithEvent<T>(fn: TransactionalEventFunction<T>): Promise<T> {
+  async transactionalWithEvent<T>(
+    fn: TransactionalEventFunction<T>,
+  ): Promise<T> {
     const eventContext = new TransactionEventContext(this.eventEmitterService);
 
     try {
@@ -219,13 +226,13 @@ async createOrder(dto: CreateOrderDto) {
 
 ### 파일 변경 목록
 
-| 작업 | 파일 | 변경 내용 |
-|------|------|-----------|
-| 신규 | `libs/event-emitter/src/TransactionPhase.ts` | `TransactionPhase` enum |
-| 신규 | `libs/event-emitter/src/TransactionEventContext.ts` | 이벤트 버퍼링 컨텍스트 |
-| 수정 | `libs/entity/src/transaction/TransactionService.ts` | `transactionalWithEvent()` 추가, `EventEmitterService` 의존성 추가 |
-| 수정 | `libs/event-emitter/test/StubEventEmitterService.ts` | 필요 시 확장 |
-| 신규 | `libs/entity/test/transaction/TransactionalEventEmitter.spec.ts` | 통합 테스트 |
+| 작업 | 파일                                                             | 변경 내용                                                          |
+| ---- | ---------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 신규 | `libs/event-emitter/src/TransactionPhase.ts`                     | `TransactionPhase` enum                                            |
+| 신규 | `libs/event-emitter/src/TransactionEventContext.ts`              | 이벤트 버퍼링 컨텍스트                                             |
+| 수정 | `libs/entity/src/transaction/TransactionService.ts`              | `transactionalWithEvent()` 추가, `EventEmitterService` 의존성 추가 |
+| 수정 | `libs/event-emitter/test/StubEventEmitterService.ts`             | 필요 시 확장                                                       |
+| 신규 | `libs/entity/test/transaction/TransactionalEventEmitter.spec.ts` | 통합 테스트                                                        |
 
 ### 모듈 의존성 변경
 

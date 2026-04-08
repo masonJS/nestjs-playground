@@ -37,13 +37,13 @@ Fair Queue:
 
 ### 왜 Redis Sorted Set인가?
 
-| 요구사항 | Redis Sorted Set 특성 |
-|---------|---------------------|
-| 우선순위 기반 정렬 | score 기반 자동 정렬 (O(log N)) |
-| 원자적 연산 | Lua 스크립트로 multi-step 연산을 원자적으로 수행 |
-| 고성능 | 인메모리 처리로 낮은 지연시간 |
-| 분산 환경 지원 | 다중 인스턴스에서 동시 접근 가능 |
-| 범위 조회 | ZRANGEBYSCORE로 특정 점수 범위 작업 조회 |
+| 요구사항           | Redis Sorted Set 특성                            |
+| ------------------ | ------------------------------------------------ |
+| 우선순위 기반 정렬 | score 기반 자동 정렬 (O(log N))                  |
+| 원자적 연산        | Lua 스크립트로 multi-step 연산을 원자적으로 수행 |
+| 고성능             | 인메모리 처리로 낮은 지연시간                    |
+| 분산 환경 지원     | 다중 인스턴스에서 동시 접근 가능                 |
+| 범위 조회          | ZRANGEBYSCORE로 특정 점수 범위 작업 조회         |
 
 ### 3개 큐 운영 전략
 
@@ -200,10 +200,10 @@ SJF 항의 수학적 분해: `(-1 + total_jobs / remaining)` = `done_jobs / rema
 
 **ALPHA 부호에 따른 동작 차이:**
 
-| ALPHA 부호 | 동작 | 효과 |
-|-----------|------|------|
-| **양수 (default: 10000)** | 진행률이 높을수록 score 증가 (우선순위 상승) | **SJF**: 거의 완료된 그룹을 빨리 끝내줌 |
-| **음수** | 진행률이 높을수록 score 감소 (우선순위 하락) | **공정 분배**: 많이 처리된 그룹은 뒤로, 덜 처리된 그룹이 앞으로 |
+| ALPHA 부호                | 동작                                         | 효과                                                            |
+| ------------------------- | -------------------------------------------- | --------------------------------------------------------------- |
+| **양수 (default: 10000)** | 진행률이 높을수록 score 증가 (우선순위 상승) | **SJF**: 거의 완료된 그룹을 빨리 끝내줌                         |
+| **음수**                  | 진행률이 높을수록 score 감소 (우선순위 하락) | **공정 분배**: 많이 처리된 그룹은 뒤로, 덜 처리된 그룹이 앞으로 |
 
 **기본 설정(ALPHA=양수)에서의 동작 원리:**
 
@@ -225,25 +225,29 @@ dequeue 후 (고객사B에서 1건 처리):
 
 ```typescript
 // SJF 모드 (기본값 — 거의 완료된 그룹 우선)
-fairQueue: { alpha: 10000 }
+fairQueue: {
+  alpha: 10000;
+}
 
 // 공정 분배 모드 (덜 처리된 그룹 우선)
-fairQueue: { alpha: -10000 }
+fairQueue: {
+  alpha: -10000;
+}
 ```
 
 ### ALPHA 튜닝 가이드
 
-| |ALPHA| 값 | 효과 |
-|-----------|------|
-| 0 | 비활성화, 순수 시간 + 기본 우선순위만 적용 |
-| 1,000 ~ 10,000 | 약한 효과 (시간 우선순위가 지배적) |
-| 100,000 ~ 1,000,000 | 강한 효과 (진행률이 큰 영향) |
+|                     | ALPHA                                      | 값  | 효과 |
+| ------------------- | ------------------------------------------ | --- | ---- |
+| 0                   | 비활성화, 순수 시간 + 기본 우선순위만 적용 |
+| 1,000 ~ 10,000      | 약한 효과 (시간 우선순위가 지배적)         |
+| 100,000 ~ 1,000,000 | 강한 효과 (진행률이 큰 영향)               |
 
-| 시나리오 | 권장 설정 |
-|---------|----------|
+| 시나리오                                | 권장 설정              |
+| --------------------------------------- | ---------------------- |
 | 남은 작업이 적은 그룹을 빨리 완료 (SJF) | ALPHA = +10,000 (양수) |
-| 고객사 간 공정성이 중요 (공정 분배) | ALPHA = -10,000 (음수) |
-| 순수 시간순 처리 | ALPHA = 0 |
+| 고객사 간 공정성이 중요 (공정 분배)     | ALPHA = -10,000 (음수) |
+| 순수 시간순 처리                        | ALPHA = 0              |
 
 실제 운영에서는 부하 테스트를 통해 적절한 ALPHA 값과 부호를 찾아야 한다.
 
@@ -253,8 +257,7 @@ fairQueue: { alpha: -10000 }
 
 Redis에서 여러 명령을 원자적으로 실행하기 위해 Lua 스크립트를 사용한다. 이는 다중 인스턴스 환경에서 race condition을 방지한다.
 
-> **⚠ Redis 버전 요구사항:**
-> `redis.call('TIME')`은 비결정적(non-deterministic) 명령이다.
+> **⚠ Redis 버전 요구사항:** > `redis.call('TIME')`은 비결정적(non-deterministic) 명령이다.
 > Redis 7.0 미만에서는 Lua 내 비결정적 명령이 replica에서 다른 값을 반환하여
 > 데이터 불일치가 발생할 수 있다. **Redis 7.0 이상 사용을 권장한다.**
 
@@ -324,6 +327,7 @@ return {totalJobs, priority}
 ```
 
 > **변경 사항 (원본 대비):**
+>
 > 1. `redis.call('TIME')`을 스크립트 시작 시 **한 번만 호출**하고 `nowMs`를 재사용 (기존: 3회 호출 가능)
 > 2. **`type` 필드를 `ARGV[7]`로 별도 저장** — 기존에는 payload JSON 안에 type이 포함되어 있었으나, Step 4의 Worker가 `job.type`으로 processor를 라우팅하므로 Hash 필드로 분리 저장해야 한다.
 > 3. `createdAt`을 `nowMs` 변수에서 재사용하여 작업 데이터와 그룹 메타의 시각이 정확히 일치
@@ -407,6 +411,7 @@ return nil
 ```
 
 > **변경 사항 (원본 대비):**
+>
 > 1. **ioredis `keyPrefix` 제거** — ioredis `keyPrefix`가 KEYS[]에만 적용되고 Lua 내부 문자열 조합 키에는 적용되지 않아 키 불일치 버그가 있었다. Service에서 full key를 직접 전달하고, Lua 내부 키는 `ARGV[2]`(prefix)를 사용하여 일관성을 보장한다.
 > 2. **같은 큐 내 재탐색 로직 추가** — 기존에는 top 그룹의 job list가 비었을 때 다음 priority 큐로 넘어갔다. 이제 `while` 루프로 같은 큐 내 다른 그룹을 재탐색하여 공정성 훼손을 방지한다.
 > 3. Service의 `getGroupJobsKey()`, `getGroupMetaKey()`, `getJobKey()`가 반환하는 full key 형식과 Lua 내부 키 조합 결과가 일치하도록 통일
@@ -434,6 +439,7 @@ return 0  -- 아직 진행 중
 ```
 
 > **변경 사항 (원본 대비):**
+>
 > 1. **불필요한 ARGV 제거** — 기존 ARGV[1](jobId), ARGV[2](groupId)는 Lua 내부에서 사용하지 않았다. KEYS[1], KEYS[2]에 이미 full key가 전달되므로 ARGV가 불필요하다.
 
 ---
@@ -601,7 +607,7 @@ export interface EnqueueOptions {
   jobId: string;
   type: string;
   payload: Record<string, unknown>;
-  basePriority?: number;      // default: 0
+  basePriority?: number; // default: 0
   priorityLevel?: PriorityLevel; // default: NORMAL
 }
 ```
@@ -639,20 +645,20 @@ import { RedisConfig } from '@app/redis/RedisConfig';
 export const BULK_ACTION_CONFIG = Symbol('BULK_ACTION_CONFIG');
 
 export interface BulkActionRedisConfig extends RedisConfig {
-  keyPrefix?: string;  // RedisKeyBuilder에서 키 생성 시 사용 (default: 'bulk-action:')
-                       // ⚠ ioredis keyPrefix로는 전달하지 않는다. (Lua 호환성)
+  keyPrefix?: string; // RedisKeyBuilder에서 키 생성 시 사용 (default: 'bulk-action:')
+  // ⚠ ioredis keyPrefix로는 전달하지 않는다. (Lua 호환성)
 }
 
 export interface FairQueueConfig {
-  alpha: number;       // SJF 가중치 (양수: SJF, 음수: 공정분배, default: 10000)
+  alpha: number; // SJF 가중치 (양수: SJF, 음수: 공정분배, default: 10000)
 }
 
 export interface BulkActionConfig {
   redis: BulkActionRedisConfig;
   fairQueue: FairQueueConfig;
-  backpressure: BackpressureConfig;      // Step 2
-  congestion: CongestionConfig;          // Step 3
-  workerPool: WorkerPoolConfig;          // Step 4
+  backpressure: BackpressureConfig; // Step 2
+  congestion: CongestionConfig; // Step 3
+  workerPool: WorkerPoolConfig; // Step 4
 }
 
 export const DEFAULT_FAIR_QUEUE_CONFIG: FairQueueConfig = {
@@ -1064,7 +1070,10 @@ export class ApiModule {}
 export class PromotionBulkService {
   constructor(private readonly fairQueue: FairQueueService) {}
 
-  async sendBulkPromotion(customerId: string, targets: string[]): Promise<void> {
+  async sendBulkPromotion(
+    customerId: string,
+    targets: string[],
+  ): Promise<void> {
     for (const targetId of targets) {
       await this.fairQueue.enqueue({
         groupId: customerId,
@@ -1313,11 +1322,11 @@ private getJobKey(groupId: string, jobId: string): string {
 
 ### Redis 메모리 관리
 
-| 항목 | 권장값 |
-|------|-------|
+| 항목               | 권장값                             |
+| ------------------ | ---------------------------------- |
 | `maxmemory-policy` | `noeviction` (큐 데이터 유실 방지) |
-| Job TTL | 완료 후 24시간 보관 후 삭제 |
-| 그룹 메타 TTL | 완료 후 7일 보관 후 삭제 |
+| Job TTL            | 완료 후 24시간 보관 후 삭제        |
+| 그룹 메타 TTL      | 완료 후 7일 보관 후 삭제           |
 
 완료된 Job과 그룹 메타데이터는 주기적으로 정리해야 한다.
 
@@ -1350,13 +1359,13 @@ bulk_action_lua_duration_ms{script="dequeue"}
 
 ### 장애 대응
 
-| 시나리오 | 대응 |
-|---------|------|
-| Redis 연결 끊김 | ioredis retryStrategy로 자동 재연결 |
+| 시나리오               | 대응                                                 |
+| ---------------------- | ---------------------------------------------------- |
+| Redis 연결 끊김        | ioredis retryStrategy로 자동 재연결                  |
 | Lua 스크립트 실행 실패 | 에러 로깅 후 재시도 (Step 6 Reliable Queue에서 보장) |
-| 메모리 부족 | maxmemory 알림 설정 + 완료 데이터 TTL 단축 |
-| 단일 그룹 폭주 | Rate Limiting (Step 2)에서 제어 |
-| 앱 종료 시 Redis 연결 | FairQueueService.onModuleDestroy()에서 자동 정리 |
+| 메모리 부족            | maxmemory 알림 설정 + 완료 데이터 TTL 단축           |
+| 단일 그룹 폭주         | Rate Limiting (Step 2)에서 제어                      |
+| 앱 종료 시 Redis 연결  | FairQueueService.onModuleDestroy()에서 자동 정리     |
 
 ### 후속 Step과의 연동 인터페이스
 
@@ -1414,10 +1423,10 @@ Step 6 적용 시 `dequeue.lua`의 `LPOP`을 `RPOPLPUSH`로 교체하고, In-fli
 4. **Step 5**: 그룹 완료 후 결과 집계 및 상태 머신 관리
 5. **Step 6**: `dequeue.lua`를 Reliable Dequeue로 교체하여 유실 방지
 
-
 ### 문서 갱신 히스토리
 
 #### 1. 2026-02-04
+
 ```
 #: 1
 이슈: SJF Boost 공식 해석 오류
@@ -1460,6 +1469,7 @@ toBeGreaterThan/toBeLessThan으로 방향성 검증
 ```
 
 #### 2. 2026-02-04
+
 ```
 #: 9
 이슈: [Critical] dequeue.lua keyPrefix 미적용으로 데이터 접근 불가
@@ -1516,6 +1526,7 @@ tsconfig.lib.json 템플릿을 NestJS 모듈 구조 섹션에 추가.
 ```
 
 #### 3. 2026-02-10
+
 ```
 #: 19
 이슈: [Major] Redis 의존성 구조가 실제 구현과 불일치
