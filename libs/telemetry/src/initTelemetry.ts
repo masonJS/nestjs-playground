@@ -1,6 +1,7 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { Configuration } from '@app/config/Configuration';
 
 let telemetrySdk: NodeSDK | undefined;
 
@@ -9,19 +10,18 @@ export const initTelemetry = (): NodeSDK | undefined => {
     return telemetrySdk;
   }
 
-  if (process.env.OTEL_ENABLED !== 'true') {
+  const { otel } = Configuration.getEnv();
+
+  if (!otel.enabled) {
     return undefined;
   }
 
-  const endpoint =
-    process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? 'http://localhost:4318';
-
   const exporter = new OTLPTraceExporter({
-    url: `${endpoint.replace(/\/$/, '')}/v1/traces`,
+    url: `${otel.exporterOtlpEndpoint.replace(/\/$/, '')}/v1/traces`,
   });
 
   telemetrySdk = new NodeSDK({
-    serviceName: process.env.OTEL_SERVICE_NAME ?? 'nestjs-playground',
+    serviceName: otel.serviceName,
     traceExporter: exporter,
     instrumentations: [
       getNodeAutoInstrumentations({
