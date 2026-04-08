@@ -10,13 +10,13 @@
 
 채널톡이 직면한 **벌크액션** 처리 문제:
 
-| 문제 | 설명 |
-|------|------|
-| 스파이크 로드 | 임의 시점에 대규모 요청이 몰림 (100만 고객 업로드, 10만 프로모션 등) |
-| 요청 손실 | 대량 요청 중 유실 발생 가능성 |
-| Head-of-line Blocking | 대형 고객사 요청이 다른 고객사 요청을 지연시킴 |
-| 비일관적 구현 | 기능별로 벌크 처리 방식이 제각각 |
-| 서비스 품질 저하 | 특정 고객사 벌크 요청이 전체 서비스에 영향 |
+| 문제                  | 설명                                                                 |
+| --------------------- | -------------------------------------------------------------------- |
+| 스파이크 로드         | 임의 시점에 대규모 요청이 몰림 (100만 고객 업로드, 10만 프로모션 등) |
+| 요청 손실             | 대량 요청 중 유실 발생 가능성                                        |
+| Head-of-line Blocking | 대형 고객사 요청이 다른 고객사 요청을 지연시킴                       |
+| 비일관적 구현         | 기능별로 벌크 처리 방식이 제각각                                     |
+| 서비스 품질 저하      | 특정 고객사 벌크 요청이 전체 서비스에 영향                           |
 
 ### 아키텍처 개요
 
@@ -93,6 +93,7 @@ priority = (-1 * now_ms) + base_priority + ALPHA * (-1 + total_jobs / max(1, tot
 벌크액션 시스템을 `libs/bulk-action/` 라이브러리로 구현한다.
 
 추가 의존성:
+
 - `ioredis` - Redis 클라이언트
 - `redlock` - 분산락
 
@@ -103,12 +104,14 @@ priority = (-1 * now_ms) + base_priority + ALPHA * (-1 + total_jobs / max(1, tot
 > 고객사별 공정한 작업 분배를 위한 큐 시스템
 
 **구현 범위:**
+
 - Redis Sorted Set 기반 우선순위 큐
 - Lua 스크립트를 통한 원자적 enqueue/dequeue 연산
 - 고객사(group)별 우선순위 계산 로직 (SJF 포함)
 - 3개 큐 운영: High / Normal / Low priority
 
 **핵심 구현 포인트:**
+
 ```typescript
 // 우선순위 계산
 function calculatePriority(group: JobGroup): number {
@@ -121,6 +124,7 @@ function calculatePriority(group: JobGroup): number {
 ```
 
 **필요 모듈:**
+
 - `BulkActionModule` - 루트 모듈
 - `FairQueueService` - 큐 관리 서비스
 - `RedisLuaScriptLoader` - Lua 스크립트 로더
@@ -132,12 +136,14 @@ function calculatePriority(group: JobGroup): number {
 > Ready Queue / Non-ready Queue 이원화 및 RPS 제한
 
 **구현 범위:**
+
 - Fixed Window 알고리즘 기반 Rate Limiter
 - Ready Queue: 즉시 실행 가능한 작업 관리
 - Non-ready Queue: 쓰로틀링/에러 작업 관리 (Redis Sorted Set, score = backoff 시간)
 - 고객사별 동적 RPS 할당
 
 **핵심 구현 포인트:**
+
 ```typescript
 // Rate Limiter - Redis INCR + EXPIRE 조합
 class FixedWindowRateLimiter {
@@ -151,6 +157,7 @@ class FixedWindowRateLimiter {
 ```
 
 **필요 모듈:**
+
 - `RateLimiterService` - Fixed Window Rate Limiter
 - `ReadyQueueService` - 실행 가능 작업 큐
 - `NonReadyQueueService` - 대기 작업 큐
@@ -162,19 +169,25 @@ class FixedWindowRateLimiter {
 > 공회전 문제 해결을 위한 동적 대기시간 계산
 
 **구현 범위:**
+
 - Non-ready Queue 내 작업 수 기반 동적 backoff 시간 계산
 - Ready ↔ Non-ready 큐 간 작업 이동 최적화
 - 쓰로틀링 횟수 최소화
 
 **핵심 구현 포인트:**
+
 ```typescript
 // 동적 대기시간 계산
-function calculateBackoffTime(nonReadyCount: number, rateLimitSpeed: number): number {
+function calculateBackoffTime(
+  nonReadyCount: number,
+  rateLimitSpeed: number,
+): number {
   return 1000 + Math.floor(nonReadyCount / rateLimitSpeed) * 1000; // ms
 }
 ```
 
 **기대 성능 (원문 부하 테스트 결과):**
+
 - 15,000개 작업, 10TPS 기준: 이상적 500초 → 실제 ~720초 (오차 +44%)
 - 평균 쓰로틀링 횟수: 1.45회/작업 (기존 수십 회 대비 대폭 감소)
 
@@ -185,12 +198,14 @@ function calculateBackoffTime(nonReadyCount: number, rateLimitSpeed: number): nu
 > Fetcher / Worker / Dispatcher 3역할 분리
 
 **구현 범위:**
+
 - Fetcher: 주기적으로 Fair Queue에서 작업을 폴링하여 Ready Queue에 할당
 - Worker: Ready Queue에서 작업을 꺼내 실행
 - Dispatcher: Non-ready Queue → Ready Queue 이동 담당
 - 고정 워커 수 설정 + 동적 스케일링 고려
 
 **핵심 구현 포인트:**
+
 ```typescript
 @Injectable()
 class WorkerPoolService implements OnModuleInit {
@@ -207,6 +222,7 @@ class WorkerPoolService implements OnModuleInit {
 ```
 
 **필요 모듈:**
+
 - `WorkerPoolService` - 워커 풀 관리
 - `FetcherService` - 작업 폴링
 - `DispatcherService` - Non-ready → Ready 이동
@@ -219,6 +235,7 @@ class WorkerPoolService implements OnModuleInit {
 > MapReduce 기반 결과 집계 + 상태 전이 감시
 
 **구현 범위:**
+
 - MapReduce 인터페이스로 작업 결과 집계
 - Watcher: 그룹 상태 전이 감시
   - `CREATED → DISPATCHED` (모든 job 수신 확인)
@@ -227,6 +244,7 @@ class WorkerPoolService implements OnModuleInit {
 - 분산락으로 다중 인스턴스 경합 방지
 
 **핵심 구현 포인트:**
+
 ```typescript
 // 상태 전이 머신
 enum GroupStatus {
@@ -245,6 +263,7 @@ interface Aggregator<T, R> {
 ```
 
 **필요 모듈:**
+
 - `AggregatorService` - MapReduce 결과 집계
 - `WatcherService` - 상태 전이 감시
 - `DistributedLockService` - Redis 기반 분산락 (Redlock)
@@ -256,12 +275,14 @@ interface Aggregator<T, R> {
 > At-least-once semantic 보장
 
 **구현 범위:**
+
 - ACK 메커니즘: Ready Queue에서 pop 시 In-flight Queue에 timeout과 함께 등록
 - Timeout 내 ACK 미수신 → orphaned job으로 판정 → Ready Queue 복구
 - 재시도 로직 (최대 재시도 횟수 설정)
 - 멱등성은 각 Job Handler에서 보장 (클라이언트 책임)
 
 **핵심 구현 포인트:**
+
 ```typescript
 class ReliableQueueService {
   async dequeue(): Promise<Job | null> {
@@ -290,6 +311,7 @@ class ReliableQueueService {
 ```
 
 **필요 모듈:**
+
 - `ReliableQueueService` - ACK 기반 안정적 큐
 - `InFlightQueueService` - 실행 중 작업 추적
 
