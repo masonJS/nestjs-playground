@@ -10,9 +10,6 @@ declare module 'vitest' {
 
     toBeEmpty(): R;
 
-    toMatchValidateErrorInlineSnapshot(
-      property: string,
-      snapshot?: string,
-    ): R;
+    toMatchValidateErrorInlineSnapshot(property: string, snapshot?: string): R;
   }
 }

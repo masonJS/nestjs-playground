@@ -70,7 +70,11 @@ describe('EventPublisherService', () => {
 
   it('JSON 메시지를 발행하면 SQS 구독자가 동일한 내용을 수신한다.', async () => {
     // given
-    const payload = { userId: 1, event: 'USER_CREATED', data: { name: 'test' } };
+    const payload = {
+      userId: 1,
+      event: 'USER_CREATED',
+      data: { name: 'test' },
+    };
     const message = JSON.stringify(payload);
 
     // when

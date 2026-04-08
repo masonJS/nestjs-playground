@@ -20,6 +20,7 @@ export class RetryExecutor {
       }
     }
 
+    // @ts-ignore
     throw lastError;
   }
 
